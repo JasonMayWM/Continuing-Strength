@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Workout App</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+    <header>
+        <h1>Workout App</h1>
+    </header>
+    <main>
+        <section id="controls">
+            <button id="weekAButton">Week A</button>
+            <button id="weekBButton">Week B</button>
+            <hr>
+            <button id="prevExerciseButton">Previous Exercise</button>
+            <button id="nextExerciseButton">Next Exercise</button>
+            <hr>
+            <button id="completeAndProgressButton">Complete Exercise & Progress</button>
+            <!-- Day selection can be added later -->
+        </section>
+        <section id="workout-display">
+            <h2 id="workout-title">Today's Workout</h2> <!-- Title can be updated by JS -->
+            <div id="workout-details">
+                <!-- Workout details will be displayed here -->
+            </div>
+        </section>
+    </main>
+    <footer>
+        <p>&copy; 2024 Workout App</p>
+    </footer>
+    <script src="script.js"></script>
+    <script src="tests.js"></script> <!-- Include test script -->
+</body>
+</html>
