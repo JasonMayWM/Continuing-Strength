@@ -11,8 +11,17 @@ let userModifiedWeights = {}; // To store weights loaded from localStorage
 const STORAGE_KEY = 'userWorkoutWeights';
 
 function getExerciseIdentifier(week, day, exerciseName) {
-    if (!exerciseName || typeof exerciseName !== 'string') return null;
-    return `${week}_${day}_${exerciseName.toLowerCase().replace(/\s+/g, '_')}`;
+    const weekStr = String(week || 'unknown_week').toLowerCase().trim();
+    const dayStr = String(day || 'unknown_day').toLowerCase().trim().replace(/\s+/g, '_');
+    const exerciseNameStr = String(exerciseName || 'unknown_exercise').toLowerCase().trim().replace(/\s+/g, '_');
+
+    if (!exerciseName || String(exerciseName).trim() === '') { // Stricter check for empty/null exercise name
+        console.warn("getExerciseIdentifier called with invalid exerciseName:", exerciseName);
+        // Return a generic placeholder or null, depending on desired handling for bad data.
+        // For now, let's ensure it doesn't break if other parts are valid.
+        return `${weekStr}_${dayStr}_unknown_exercise_name`;
+    }
+    return `${weekStr}_${dayStr}_${exerciseNameStr}`;
 }
 
 function parseProgressionRule(ruleString) {
@@ -76,9 +85,12 @@ function initializeCurrentWeek() {
 
 // Function to fetch and parse the Excel file
 async function loadWorkoutData() {
+    // This will be the new structure, e.g., workoutData['A']['Day 1'] = [exerciseObj1, exerciseObj2]
+    // Or workoutData['1']['Day 1'] etc. if week is numeric in Excel
+    let newWorkoutData = {};
+
     try {
-        // Load Excel file from a local relative path for Apache deployment
-        const response = await fetch('./Workout%20Web%20App%20Template.xlsx');
+        const response = await fetch('./Workout%20Web%20App%20Template%202.xlsx');
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -87,63 +99,157 @@ async function loadWorkoutData() {
         const workbook = XLSX.read(data, { type: 'array' });
 
         console.log("Available sheet names:", workbook.SheetNames);
+        if (workbook.SheetNames.length === 0) {
+            console.error("No sheets found in the Excel file.");
+            throw new Error("No sheets found in Excel file.");
+        }
 
-        const targetSheetNames = ['Week A', 'Week B'];
-        let foundSheet = false;
+        // Assume data is in the first sheet
+        const firstSheetName = workbook.SheetNames[0];
+        console.log("Processing sheet:", firstSheetName);
+        const worksheet = workbook.Sheets[firstSheetName];
 
-        for (const sheetName of workbook.SheetNames) {
-            if (targetSheetNames.includes(sheetName)) {
-                console.log("Processing sheet:", sheetName);
-                const worksheet = workbook.Sheets[sheetName];
-                const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+        // Use { defval: "" } to ensure empty cells are treated as empty strings
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
 
-                if (jsonData.length === 0) {
-                    console.warn(`Sheet ${sheetName} is empty or no data found.`);
-                    continue; // Skip this sheet
-                }
-                // console.log(`Raw JSON data from ${sheetName} (first 5 rows):`, jsonData.slice(0, 5));
+        if (jsonData.length === 0) {
+            console.error(`Sheet "${firstSheetName}" is empty or no data found.`);
+            throw new Error(`Sheet "${firstSheetName}" is empty.`);
+        }
 
-                const headers = jsonData[0];
-                // console.log(`Detected headers for ${sheetName}:`, headers);
-
-                const parsedSheetData = jsonData.slice(1).map(row => {
-                    const exercise = {};
-                    headers.forEach((header, index) => {
-                        const headerKey = typeof header === 'string' ? header.toLowerCase().trim() : `column_${index}`;
-                        exercise[headerKey] = row[index];
-                    });
-                    return exercise;
-                }).filter(exercise => {
-                    // Basic validation: ensure there's at least an exercise name or similar primary key
-                    // This assumes headers like 'exercise', 'lift', 'activity'. Adjust if needed.
-                    const primaryValue = exercise.exercise || exercise.lift || exercise.activity || exercise[headers[0].toLowerCase().trim()];
-                    return primaryValue !== undefined && String(primaryValue).trim() !== '';
-                });
-
-                if (sheetName === 'Week A') {
-                    workoutData.A = parsedSheetData;
-                    console.log(`Processed ${workoutData.A.length} exercises for Week A.`);
-                } else if (sheetName === 'Week B') {
-                    workoutData.B = parsedSheetData;
-                    console.log(`Processed ${workoutData.B.length} exercises for Week B.`);
-                }
-                foundSheet = true;
+        // Basic check for critical columns in the first data row
+        const firstRow = jsonData[0];
+        const requiredColumns = ['Week', 'Day', 'ExerciseName']; // Adjust if column names are different
+        for (const col of requiredColumns) {
+            if (!(col in firstRow)) {
+                console.warn(`Critical column "${col}" missing in sheet "${firstSheetName}". Data parsing might fail or be incomplete.`);
+                // Depending on strictness, could throw an error here
             }
         }
 
-        if (!foundSheet) {
-            console.error("Neither 'Week A' nor 'Week B' sheets were found in the Excel file.");
-            displayCurrentWorkout(); // Will show "no data"
-            return;
+        jsonData.forEach(row => {
+            let week = row.Week ? String(row.Week).trim() : null;
+            let day = row.Day ? String(row.Day).trim() : null;
+            const exerciseName = row.ExerciseName ? String(row.ExerciseName).trim() : null;
+
+            if (!week || !day || !exerciseName) {
+                console.warn("Skipping row due to missing Week, Day, or ExerciseName:", row);
+                return; // Skip this row
+            }
+
+            // Normalize Day names (e.g., "Monday" -> "Day 1")
+            const dayMap = { "monday": "Day 1", "tuesday": "Day 2", "wednesday": "Day 3", "thursday": "Day 4", "friday": "Day 5", "saturday": "Day 6", "sunday": "Day 7" };
+            const lowerDay = day.toLowerCase();
+            if (dayMap[lowerDay]) {
+                day = dayMap[lowerDay];
+            } else if (!lowerDay.startsWith("day")) { // If not already "Day X" and not a known day name, log warning
+                console.warn(`Unrecognized day format: "${row.Day}". Using as is. Consider mapping to "Day X" format.`);
+            }
+
+
+            if (!newWorkoutData[week]) {
+                newWorkoutData[week] = {};
+            }
+            if (!newWorkoutData[week][day]) {
+                newWorkoutData[week][day] = [];
+            }
+
+            const exerciseEntry = {
+                ExerciseName: exerciseName,
+                SetType: row.SetType || "", // e.g., "Warmup", "Working", "Accessory"
+                Sets: row.Sets || "",
+                Reps: row.Reps || "",
+                Weight: row.Weight || "",
+                Progression: row.Progression || "",
+                Notes: row.Notes || "",
+                Unit: row.Unit || "kg", // Default to kg if not specified
+                ExerciseOrder: row.ExerciseOrder !== undefined ? parseInt(row.ExerciseOrder, 10) : Infinity, // For sorting
+                // Add any other relevant fields from the new Excel format
+                // Example: 'Warmup 1 %', 'Warmup 1 Reps' might now be part of SetType logic or separate rows
+            };
+            newWorkoutData[week][day].push(exerciseEntry);
+        });
+
+        // Sort individual set entries by ExerciseOrder within each day
+        for (const weekKey in newWorkoutData) {
+            for (const dayKey in newWorkoutData[weekKey]) {
+                newWorkoutData[weekKey][dayKey].sort((a, b) => a.ExerciseOrder - b.ExerciseOrder);
+            }
         }
 
-        console.log("Workout data loaded:", workoutData);
-        // Initialize current week after data is loaded, then display
+        // --- Grouping Logic ---
+        const groupedWorkoutData = {};
+        for (const weekKey in newWorkoutData) {
+            groupedWorkoutData[weekKey] = {};
+            for (const dayKey in newWorkoutData[weekKey]) {
+                const individualSetsArray = newWorkoutData[weekKey][dayKey];
+                const groupedExercisesArray = [];
+                let currentExerciseBlock = null;
+
+                if (individualSetsArray.length === 0) {
+                    groupedWorkoutData[weekKey][dayKey] = [];
+                    continue;
+                }
+
+                individualSetsArray.forEach(setEntry => {
+                    if (!currentExerciseBlock || setEntry.ExerciseName !== currentExerciseBlock.ExerciseName) {
+                        if (currentExerciseBlock) {
+                            groupedExercisesArray.push(currentExerciseBlock);
+                        }
+                        currentExerciseBlock = {
+                            ExerciseName: setEntry.ExerciseName,
+                            ExerciseOrder: setEntry.ExerciseOrder, // Assumes ExerciseOrder is consistent for sets of the same exercise
+                            // Add other top-level exercise properties here if they exist and are consistent
+                            // e.g., Progression, overall Notes for the exercise, etc.
+                            // For now, these are assumed to be per-set or handled differently.
+                            // We might need to pull Progression from the first 'Work Set' later if needed at this level.
+                            Progression: setEntry.Progression, // Taking from first set for now
+                            sets: [setEntry]
+                        };
+                    } else {
+                        currentExerciseBlock.sets.push(setEntry);
+                        // Consolidate progression: if later sets have progression, it might apply to the whole exercise
+                        // For now, the first set's progression is taken. This might need refinement.
+                        if (!currentExerciseBlock.Progression && setEntry.Progression) {
+                            currentExerciseBlock.Progression = setEntry.Progression;
+                        }
+                    }
+                });
+
+                if (currentExerciseBlock) { // Push the last exercise block
+                    groupedExercisesArray.push(currentExerciseBlock);
+                }
+
+                // The groupedExercisesArray should already be sorted by ExerciseOrder
+                // if the individualSetsArray was sorted and ExerciseOrder is consistent for an exercise.
+                // If ExerciseOrder can vary per set of the same exercise and block order matters,
+                // an additional sort of groupedExercisesArray by ExerciseOrder would be needed here.
+                groupedWorkoutData[weekKey][dayKey] = groupedExercisesArray;
+            }
+        }
+        // --- End Grouping Logic ---
+
+        // Assign to global workoutData
+        workoutData = groupedWorkoutData; // Use the new grouped structure
+        console.log("Grouped workout data structure loaded and processed:", workoutData);
+        if (Object.keys(workoutData).length > 0) {
+             const firstWeekKey = Object.keys(workoutData)[0];
+             if (workoutData[firstWeekKey] && Object.keys(workoutData[firstWeekKey]).length > 0) {
+                const firstDayKey = Object.keys(workoutData[firstWeekKey])[0];
+                if (workoutData[firstWeekKey][firstDayKey] && workoutData[firstWeekKey][firstDayKey].length > 0) {
+                     console.log("Sample grouped exercise entry:", workoutData[firstWeekKey][firstDayKey][0]);
+                     if (workoutData[firstWeekKey][firstDayKey][0].sets) {
+                        console.log("Sets for sample exercise:", workoutData[firstWeekKey][firstDayKey][0].sets);
+                     }
+                }
+             }
+        }
+
         initializeCurrentWeek();
         displayCurrentWorkout();
 
     } catch (error) {
-        console.error("Error loading or parsing workout data:", error);
+        console.error("Error in loadWorkoutData:", error);
         const workoutDetailsDiv = document.getElementById('workout-details');
         if (workoutDetailsDiv) {
             workoutDetailsDiv.innerHTML = '<p>Error loading workout data. Please check the console.</p>';
@@ -185,304 +291,136 @@ function displayCurrentWorkout() {
     //     return;
     // }
 
-    // Filter exercises for the current day
-    const dayExercises = weekData.filter(exercise => exercise.day && typeof exercise.day === 'string' && exercise.day.trim() === currentDay);
+    const weekKey = String(currentWeek);
+    const dayKey = String(currentDay);
 
-    if (dayExercises.length === 0) {
-        workoutDetailsDiv.innerHTML = `<p>No exercises found for Week ${currentWeek}, ${currentDay}.</p>`;
-        console.log(`No exercises for Week ${currentWeek}, ${currentDay}. Week data:`, weekData);
-        updateNavigationButtons(dayExercises.length);
+    workoutTitleEl.textContent = `Workout: Week ${weekKey} - ${dayKey}`; // Update main title
+
+    if (!workoutData[weekKey] || !workoutData[weekKey][dayKey]) {
+        workoutDetailsDiv.innerHTML = `<p>No workout data available for Week ${weekKey}, ${dayKey}.</p>`;
+        updateNavigationButtons(0);
         return;
     }
 
-    // Ensure currentExerciseIndex is within bounds
+    const dayExerciseBlocks = workoutData[weekKey][dayKey]; // Array of exercise blocks
+
+    if (dayExerciseBlocks.length === 0) {
+        workoutDetailsDiv.innerHTML = `<p>No exercises scheduled for Week ${weekKey}, ${dayKey}.</p>`;
+        updateNavigationButtons(0);
+        return;
+    }
+
     if (currentExerciseIndex < 0) currentExerciseIndex = 0;
-    if (currentExerciseIndex >= dayExercises.length) currentExerciseIndex = dayExercises.length - 1;
+    if (currentExerciseIndex >= dayExerciseBlocks.length) currentExerciseIndex = dayExerciseBlocks.length - 1;
 
-    const exercise = dayExercises[currentExerciseIndex];
+    const currentExerciseBlock = dayExerciseBlocks[currentExerciseIndex];
 
-    if (!exercise) {
-        workoutDetailsDiv.innerHTML = `<p>Error: Could not retrieve exercise at index ${currentExerciseIndex}.</p>`;
-        updateNavigationButtons(dayExercises.length);
+    if (!currentExerciseBlock || !currentExerciseBlock.sets || currentExerciseBlock.sets.length === 0) {
+        workoutDetailsDiv.innerHTML = `<p>Error: Exercise block is invalid or has no sets.</p>`;
+        updateNavigationButtons(dayExerciseBlocks.length);
         return;
     }
 
-    let htmlContent = `<div class="exercise-view">`;
-    // Exercise Number: e.g., "Exercise 1 of 5"
-    htmlContent += `<h4>Exercise ${currentExerciseIndex + 1} of ${dayExercises.length}</h4>`;
+    let htmlContent = `<div class="exercise-block-view">`;
+    // "Displaying exercise X of Y"
+    htmlContent += `<h4>Displaying exercise ${currentExerciseIndex + 1} of ${dayExerciseBlocks.length}: ${currentExerciseBlock.ExerciseName}</h4>`;
 
-    // Determine current weight to use (from localStorage or Excel default)
-    const exerciseNameForId = exercise.exercise || (exercise.name || 'unknown_exercise'); // Ensure there's a name
-    const exerciseId = getExerciseIdentifier(currentWeek, currentDay, exerciseNameForId);
-    let currentWeightToUse = exercise.weight; // Default from Excel
-    let weightUnit = ''; // Store the unit part of the weight string
+    htmlContent += `<table><thead><tr>
+                        <th>Set Type</th>
+                        <th>Sets</th>
+                        <th>Reps</th>
+                        <th>Weight</th>
+                        <th>Notes</th>
+                      </tr></thead><tbody>`;
 
-    if (exerciseId && userModifiedWeights[exerciseId] !== undefined) {
-        currentWeightToUse = userModifiedWeights[exerciseId];
-        console.log(`Using stored weight for ${exerciseId}: ${currentWeightToUse}`);
-    } else {
-        console.log(`No stored weight for ${exerciseId}, using default: ${currentWeightToUse}`);
-    }
+    currentExerciseBlock.sets.forEach((setEntry, setIndex) => {
+        htmlContent += `<tr>`;
+        // htmlContent += `<td>${setIndex === 0 ? currentExerciseBlock.ExerciseName : ""}</td>`; // Show Exercise Name only for first set row
+        htmlContent += `<td>${setEntry.SetType || ""}</td>`;
+        htmlContent += `<td>${setEntry.Sets || ""}</td>`;
+        htmlContent += `<td>${setEntry.Reps || ""}</td>`;
 
-    // Extract unit from the weight string (e.g., "kg", "lbs")
-    if (currentWeightToUse && typeof currentWeightToUse === 'string') {
-        const weightMatch = currentWeightToUse.match(/[a-zA-Z]+$/);
-        if (weightMatch) weightUnit = weightMatch[0];
-    } else if (typeof currentWeightToUse === 'number' && typeof exercise.weight === 'string') {
-        // If stored weight is a number, try to get unit from original Excel weight string
-        const originalWeightMatch = exercise.weight.match(/[a-zA-Z]+$/);
-        if (originalWeightMatch) weightUnit = originalWeightMatch[0];
-    }
+        let weightToDisplay = setEntry.Weight || "";
+        const exerciseIdForStorage = getExerciseIdentifier(weekKey, dayKey, currentExerciseBlock.ExerciseName); // ID for the whole exercise block
 
+        if (setEntry.SetType && setEntry.SetType.toLowerCase().includes('warmup')) {
+            if (String(setEntry.Weight).includes('%')) {
+                let workSetBaseWeightString = null;
+                let workSetUnit = setEntry.Unit || 'kg';
 
-    // Main exercise details - adjust keys as per actual Excel columns (they are lowercased during parsing)
-    htmlContent += `<p><strong>Exercise:</strong> ${exercise.exercise || 'N/A'}</p>`;
-    htmlContent += `<p><strong>Sets:</strong> ${exercise.sets || 'N/A'}</p>`;
-    htmlContent += `<p><strong>Reps:</strong> ${exercise.reps || 'N/A'}</p>`;
-    htmlContent += `<p><strong>Weight:</strong> ${currentWeightToUse || 'N/A'}</p>`;
+                // Find a 'Work Set' within this same exercise block
+                const correspondingWorkSet = currentExerciseBlock.sets.find(s => s.SetType && s.SetType.toLowerCase().includes('work'));
 
-    // Warmup Sets Display
-    let warmupHtml = '';
-    const baseWeightForWarmupNumeric = parseFloat(String(currentWeightToUse).replace(/[^0-9.]/g, ''));
+                if (correspondingWorkSet) {
+                    // For work set weight, prioritize localStorage for the main exercise name
+                    if (exerciseIdForStorage && userModifiedWeights[exerciseIdForStorage] !== undefined) {
+                        workSetBaseWeightString = userModifiedWeights[exerciseIdForStorage];
+                    } else {
+                        workSetBaseWeightString = correspondingWorkSet.Weight; // Default from Excel for the work set
+                    }
 
-    for (let i = 1; i <= 3; i++) { // Assuming up to 3 warmup sets
-        const warmupPercentKey = `warmup ${i} %`;
-        const warmupRepsKey = `warmup ${i} reps`;
+                    if (typeof workSetBaseWeightString === 'string') {
+                        const match = workSetBaseWeightString.match(/[a-zA-Z]+$/);
+                        if (match) workSetUnit = match[0].toLowerCase();
+                    } else if (correspondingWorkSet.Unit) {
+                        workSetUnit = correspondingWorkSet.Unit.toLowerCase();
+                    }
+                }
 
-        const percentValue = exercise[warmupPercentKey];
-        const repsValue = exercise[warmupRepsKey];
-
-        if ((percentValue || repsValue) && !isNaN(baseWeightForWarmupNumeric) && baseWeightForWarmupNumeric > 0) {
-            let warmupWeightDisplay = '';
-            if (percentValue) {
-                const calculatedWarmupWeight = Math.round((baseWeightForWarmupNumeric * (parseFloat(String(percentValue).replace('%','')) / 100)) / 2.5) * 2.5;
-                warmupWeightDisplay = `(${calculatedWarmupWeight}${weightUnit} for ${repsValue || 'N/A'} reps)`;
-            } else if (repsValue) { // Only reps provided for warmup (less common for % based)
-                warmupWeightDisplay = `(for ${repsValue} reps at a lighter weight)`;
+                if (workSetBaseWeightString) {
+                    const baseNumeric = parseFloat(String(workSetBaseWeightString).replace(/[^0-9.]/g, ''));
+                    const warmupPercent = parseFloat(String(setEntry.Weight).replace('%', ''));
+                    if (!isNaN(baseNumeric) && baseNumeric > 0 && !isNaN(warmupPercent)) {
+                        const calculatedWarmupWeight = Math.round((baseNumeric * (warmupPercent / 100)) / 2.5) * 2.5;
+                        weightToDisplay = `${calculatedWarmupWeight}${workSetUnit}`;
+                    } else {
+                        weightToDisplay = `Error calc: ${setEntry.Weight} of ${workSetBaseWeightString}`;
+                    }
+                } else {
+                    weightToDisplay = `Cannot calc % (No Work Set for ${currentExerciseBlock.ExerciseName})`;
+                }
             }
-            warmupHtml += `<li>Warmup Set ${i}: ${percentValue || ''} ${repsValue ? (percentValue ? 'x ':'') + repsValue + ' reps' : ''} ${warmupWeightDisplay}</li>`;
-        } else if (percentValue || repsValue) { // Case where base weight might be missing or not a number, but warmups are specified
-            warmupHtml += `<li>Warmup Set ${i}: ${percentValue || ''} ${repsValue ? (percentValue ? 'x ':'') + repsValue + ' reps' : ''} (Base weight needed for calculation)</li>`;
+            // Absolute warmup weights are already in setEntry.Weight
+        } else if (setEntry.SetType && setEntry.SetType.toLowerCase().includes('work')) {
+            // For 'Work Set', prioritize localStorage weight for the main exercise name
+            if (exerciseIdForStorage && userModifiedWeights[exerciseIdForStorage] !== undefined) {
+                weightToDisplay = userModifiedWeights[exerciseIdForStorage];
+            }
+            // If not in localStorage, setEntry.Weight (which is already in weightToDisplay) is used.
+            // Append unit if not already part of the weight string
+            if (typeof weightToDisplay === 'number' || !String(weightToDisplay).match(/[a-zA-Z]+$/)) {
+                 weightToDisplay = `${weightToDisplay}${setEntry.Unit || 'kg'}`;
+            }
+        } else { // Other set types, or if SetType is missing
+             if (typeof weightToDisplay === 'number' || (weightToDisplay && !String(weightToDisplay).match(/[a-zA-Z]+$/))) {
+                 weightToDisplay = `${weightToDisplay}${setEntry.Unit || 'kg'}`;
+            }
         }
+
+        htmlContent += `<td>${weightToDisplay}</td>`;
+        htmlContent += `<td>${setEntry.Notes || ""}</td>`;
+        htmlContent += `</tr>`;
+    });
+
+    htmlContent += `</tbody></table>`;
+
+    // Display Progression for the entire exercise block
+    if (currentExerciseBlock.Progression && String(currentExerciseBlock.Progression).trim() !== '') {
+        htmlContent += `<p style="margin-top:10px;"><strong>Progression for ${currentExerciseBlock.ExerciseName}:</strong> <span id="progressionRuleText">${currentExerciseBlock.Progression}</span></p>`;
     }
-    if (warmupHtml) {
-        htmlContent += `<p><strong>Warmups:</strong><ul>${warmupHtml}</ul></p>`;
-    }
-
-    // Progressive Overload Info
-    if (exercise.progression && String(exercise.progression).trim() !== '') {
-        htmlContent += `<p><strong>Progression:</strong> <span id="progressionRuleText">${exercise.progression}</span></p>`;
-    }
-
-    // Notes
-    if (exercise.notes && String(exercise.notes).trim() !== '') {
-        htmlContent += `<p><strong>Notes:</strong> ${exercise.notes}</p>`;
-    }
-    // The stray '}' and the 'else if (reps)' that followed were part of a corrupted section.
-    // The 'else if (reps)' was correctly part of the warmup logic block above.
-    // The corrected warmup logic is already in place from previous steps.
-    // This search block is primarily to remove the corrupted 'Notes' section and ensure the correct one remains.
-    // The actual 'else if (reps)' and subsequent lines for warmupHtml were part of the *warmup* loop,
-    // which seems to have been duplicated/merged incorrectly with the notes section in the provided file content.
-    // The version of the warmup loop that is correct is already present *before* this corrupted notes section.
-    // Therefore, we are effectively deleting the corrupted block that contained the bad '}' and the misplaced 'else if'.
-    // The correctly structured 'Notes' if block is already present a few lines below in the original file
-    // (and is identical to the one above this comment, which we are keeping).
-    // To be safe, I will ensure the correct full Notes block is what remains.
-    // The previous `read_files` output showed two "Notes" sections. This will consolidate to one.
-
-    // Progressive Overload Info (This should follow Warmups)
-    // The Progressive Overload and the *second* (correct) Notes section were actually fine,
-    // the error was the duplicated, corrupted part from warmup logic that got inserted *before* them.
-    // The `read_files` output showed:
-    // ... correct warmup logic ...
-    // ... Progressive Overload Info ...
-    // ... Notes (corrupted block with extra '}') ...  <-- THIS IS THE TARGET OF THE SEARCH
-    // ... Progressive Overload Info (duplicate) ...
-    // ... Notes (duplicate) ...
-    // ... htmlContent += `</div>`; ...
-
-    // The goal is to have:
-    // ... correct warmup logic ...
-    // ... Progressive Overload Info ...
-    // ... Correct Notes ...
-    // ... htmlContent += `</div>`; ...
-
-    // The search block targets the first (corrupted) notes section and the duplicated progressive overload.
-    // It will be replaced by ensuring the correct Progressive Overload and Notes are present.
-    // This is a bit complex due to the nature of the corruption shown in `read_files`.
-
-    // The `read_files` output actually showed this sequence:
-    // ... (end of correct warmup loop) ...
-    // if (warmupHtml) { ... }
-    // if (exercise.progression && ...) { ... } // Correct Progression
-    // if (exercise.notes && ...) { htmlContent += `<p><strong>Notes:</strong> ${exercise.notes}</p>`; } // Correct Notes
-    //                } <--- THIS IS THE EXTRA BRACE AT LINE 281 FROM THE BUG REPORT
-    //            } else if (reps) { ... } // This was the start of the corrupted block copied from warmup
-    // ... more corrupted warmup logic ...
-    // if (warmupHtml) { ... } // Duplicate from corruption
-    // if (exercise.progression && ...) { ... } // Duplicate from corruption
-    // if (exercise.notes && ...) { ... } // Duplicate from corruption
-    // htmlContent += `</div>`;
-
-    // The SEARCH block will target the extra brace and the misplaced `else if`
-    // and the duplicated sections that followed it.
-
-    // Let's simplify. The core issue is the extra `}` at line 281 and the misplaced `else if`
-    // The `read_files` output was a bit confusing with the duplicated blocks.
-    // The actual error is just the extra brace.
-    // The lines `else if (reps)` etc. are NOT duplicated but are part of the earlier correct warmup block.
-    // The file content provided in the prompt seems to have a small section of the warmup logic duplicated and incorrectly placed within the notes.
-
-    // Correct structure for notes (which is already there, but the search needs to remove the bad part):
-    // }
-    // Progressive Overload Info
-    // if (exercise.progression && String(exercise.progression).trim() !== '') {
-    // htmlContent += `<p><strong>Progression:</strong> <span id="progressionRuleText">${exercise.progression}</span></p>`;
-    // }
-    // Notes
-    // if (exercise.notes && String(exercise.notes).trim() !== '') {
-    // htmlContent += `<p><strong>Notes:</strong> ${exercise.notes}</p>`;
-    // }
-
-    // The specific error from the prompt is the extra '}' and the 'else if' that follows.
-    // Line 280: htmlContent += `<p><strong>Notes:</strong> ${exercise.notes}</p>`;
-    // Line 281: }
-    // Line 282: } else if (repsValue) { ... this was from the previous agent turn's attempt to fix a similar bug
-    // It seems the problem is simpler: just an extra closing brace.
-
-    // The previous `read_files` showed:
-    // ...
-    // if (exercise.notes && String(exercise.notes).trim() !== '') {
-    //    htmlContent += `<p><strong>Notes:</strong> ${exercise.notes}</p>`;
-    //            } // EXTRA BRACE HERE (LINE 281 in the prompt's mental model)
-    //        } else if (reps) { // THIS IS PART OF WARMUP LOGIC, MISPLACED (LINE 282)
-    //            warmupWeightDisplay = `(for ${reps} reps)`;
-    //        }
-    //        warmupHtml += `<li>Warmup Set ${i}: ${percent ? percent + '%' : ''} ${reps ? 'x ' + reps : ''} ${warmupWeightDisplay}</li>`;
-    //    }
-    //}
-    //if (warmupHtml) {
-    //    htmlContent += `<p><strong>Warmups:</strong><ul>${warmupHtml}</ul></p>`;
-    //}
-
-    // Progressive Overload Info
-    //if (exercise.progression && String(exercise.progression).trim() !== '') {
-    //    htmlContent += `<p><strong>Progression:</strong> ${exercise.progression}</p>`;
-    //}
-
-    // Notes  <-- THIS IS THE *CORRECT* NOTES SECTION
-    //if (exercise.notes && String(exercise.notes).trim() !== '') {
-    //    htmlContent += `<p><strong>Notes:</strong> ${exercise.notes}</p>`;
-    //}
-    // htmlContent += `</div>`;
-
-    // The error is simply the extra '}' at line 281. The lines after it are a *misinterpretation* of the file structure due to that brace.
-    // The `else if (reps)` and subsequent lines are *not* duplicated but part of the *original* warmup loop that appears *before* the notes section.
-    // The `read_files` output was confusing because the extra brace broke the structure when I was reading it.
-
-    // The fix is to remove the single extra brace.
-    // The code block that immediately follows the `Notes` section should be the closing `htmlContent += "</div>";`
-    // Wait, the `read_files` output I have from the previous turn is:
-    // Line 278: htmlContent += `<p><strong>Notes:</strong> ${exercise.notes}</p>`;
-    // Line 279:                 } // <<<< THIS IS THE EXTRA BRACE
-    // Line 280:             } else if (reps) { // Only reps provided // <<<< THIS IS MISPLACED WARMUP CODE
-    // Line 281:                 warmupWeightDisplay = `(for ${reps} reps)`;
-    // Line 282:             }
-    // Line 283:             warmupHtml += `<li>Warmup Set ${i}: ${percent ? percent + '%' : ''} ${reps ? 'x ' + reps : ''} ${warmupWeightDisplay}</li>`;
-    // Line 284:         }
-    // Line 285:     }
-    // Line 286:     if (warmupHtml) {
-    // Line 287:         htmlContent += `<p><strong>Warmups:</strong><ul>${warmupHtml}</ul></p>`;
-    // Line 288:     }
-    // Line 289:
-    // Line 290:     // Progressive Overload Info
-    // Line 291:     if (exercise.progression && String(exercise.progression).trim() !== '') {
-    // Line 292:         htmlContent += `<p><strong>Progression:</strong> ${exercise.progression}</p>`;
-    // Line 293:     }
-    // Line 294:
-    // Line 295:     // Notes
-    // Line 296:     if (exercise.notes && String(exercise.notes).trim() !== '') {
-    // Line 297:         htmlContent += `<p><strong>Notes:</strong> ${exercise.notes}</p>`;
-    // Line 298:     }
-    // Line 299:
-    // Line 300:     htmlContent += `</div>`;
-
-    // The issue is that the block from line 279 to 288 is a corrupted, duplicated piece of the warmup logic
-    // that got inserted *after* the first (correct) Notes block and *before* the (correct) Progressive Overload block.
-    // The first Notes block is fine. The Progressive Overload block is fine. The second Notes block is fine.
-
-    // The SEARCH block should be lines 279-288. This whole block is the erroneous duplicated warmup logic.
-    // It will be replaced with nothing, effectively deleting it.
-
-    // No, the problem description states: "Unexpected token 'else' message."
-    // This happens when an `else` or `else if` does not have a preceding `if` in the same block.
-    // The extra `}` at line 281 (in the prompt's numbering) closes the `if (exercise.notes ...)` block.
-    // Then `} else if (reps)` on line 282 becomes an error.
-    // The lines from `else if (reps)` down to the end of that duplicated warmup logic are what need to be removed.
-    // The `read_files` output shows the structure clearly now.
-    // The first `Notes` section (lines 277-278) is correct.
-    // The error starts with the `}` on line 279. This closes the `if` on 277.
-    // Then line 280 `} else if (reps)` is an error.
-    // So, the block from line 279 to line 288 (inclusive of the duplicated `if (warmupHtml)`) is the problem.
-    // It's a fragment of the warmup logic that was mistakenly copied/merged.
-
-    // Search for the extra closing brace of the first `Notes` if block, and the subsequent misplaced warmup code.
-    // This is exactly what the prompt described.
-    // The `read_files` output shows the first `Notes` block is:
-    //    if (exercise.notes && String(exercise.notes).trim() !== '') {
-    //        htmlContent += `<p><strong>Notes:</strong> ${exercise.notes}</p>`;
-    //                } <--- THIS IS THE EXTRA BRACE (line 279 in my current read_file output)
-    // The lines that follow, from `} else if (reps)` up to and including the `if (warmupHtml)` that ends the duplicated warmup fragment, are the issue.
-    // This is the block from line 279 to 288.
-
-    // The replacement is empty because these lines should be deleted.
-    // The correct "Progressive Overload Info" and the second (correct) "Notes" section will then naturally follow.
-    // The `replace_with_git_merge_diff` tool needs a non-empty replacement.
-    // So, the strategy is to find the line *before* the error and the line *after* the error,
-    // and replace the whole chunk with just the line before and the line after, effectively deleting the middle.
-
-    // The line before the error: htmlContent += `<p><strong>Notes:</strong> ${exercise.notes}</p>`; (from the *first* notes block)
-    // The block to delete starts with the `}` on the next line, and ends before the *correct* `// Progressive Overload Info`
-    // So, from `}` (line 279) to `htmlContent += <p><strong>Warmups:</strong><ul>${warmupHtml}</ul></p>`; (line 287's closing `}`)
-
-    // Let's try a simpler approach: remove only the extra brace.
-    // The `else if` following it would then attach to the `if (percentValue)` inside the *actual* warmup loop,
-    // which would also be wrong.
-
-    // The problem is definitely the duplicated block as identified: lines 279-288 in the `read_files` output.
-    // This entire block is a malformed and misplaced copy of parts of the warmup logic.
-    // It needs to be removed entirely.
-    // The `replace_with_git_merge_diff` tool should allow an empty replacement.
-    // If not, I will replace it with a comment, then remove the comment in a subsequent step.
-    // For now, let's try replacing with empty.
-
-    // The identified problematic block from `read_files` output:
-    // Line 278: htmlContent += `<p><strong>Notes:</strong> ${exercise.notes}</p>`;
-    // Line 279:                 }
-    // Line 280:             } else if (reps) { // Only reps provided
-    // Line 281:                 warmupWeightDisplay = `(for ${reps} reps)`;
-    // Line 282:             }
-    // Line 283:             warmupHtml += `<li>Warmup Set ${i}: ${percent ? percent + '%' : ''} ${reps ? 'x ' + reps : ''} ${warmupWeightDisplay}</li>`;
-    // Line 284:         }
-    // Line 285:     }
-    // Line 286:     if (warmupHtml) {
-    // Line 287:         htmlContent += `<p><strong>Warmups:</strong><ul>${warmupHtml}</ul></p>`;
-    // Line 288:     }
-    // Line 289:
-    // Line 290:     // Progressive Overload Info
-    // The search block should be lines 279-288.
 
     htmlContent += `</div>`;
     workoutDetailsDiv.innerHTML = htmlContent;
 
-    updateNavigationButtons(dayExercises.length);
+    updateNavigationButtons(dayExerciseBlocks.length); // Pass length of exercise blocks array
 }
 
 // Placeholder for updateNavigationButtons - will be implemented in Part 2
 function updateNavigationButtons(totalExercisesToday) {
     const prevButton = document.getElementById('prevExerciseButton');
     const nextButton = document.getElementById('nextExerciseButton');
+    const completeAndProgressButton = document.getElementById('completeAndProgressButton');
+
 
     if (prevButton) {
         prevButton.disabled = currentExerciseIndex <= 0;
@@ -490,6 +428,23 @@ function updateNavigationButtons(totalExercisesToday) {
     if (nextButton) {
         nextButton.disabled = currentExerciseIndex >= totalExercisesToday - 1;
         if (totalExercisesToday === 0) nextButton.disabled = true; // also disable if no exercises
+    }
+
+    // Enable "Complete & Progress" only for 'Work Set' type exercises that have a progression rule
+    let enableProgressButton = false;
+    if (totalExercisesToday > 0 && currentExerciseIndex < totalExercisesToday) {
+        const weekKey = String(currentWeek);
+        const dayKey = String(currentDay);
+        if (workoutData[weekKey] && workoutData[weekKey][dayKey] && workoutData[weekKey][dayKey][currentExerciseIndex]) {
+            const currentExData = workoutData[weekKey][dayKey][currentExerciseIndex];
+            if (currentExData.SetType && currentExData.SetType.toLowerCase().includes('work') &&
+                currentExData.Progression && String(currentExData.Progression).trim() !== '') {
+                enableProgressButton = true;
+            }
+        }
+    }
+    if (completeAndProgressButton) {
+        completeAndProgressButton.disabled = !enableProgressButton;
     }
 }
 
@@ -500,6 +455,8 @@ function updateNavigationButtons(totalExercisesToday) {
 function setupEventListeners() {
     const weekAButton = document.getElementById('weekAButton');
     const weekBButton = document.getElementById('weekBButton');
+    const prevExerciseButton = document.getElementById('prevExerciseButton'); // Already defined, just for context
+    const nextExerciseButton = document.getElementById('nextExerciseButton'); // Already defined
     const completeAndProgressButton = document.getElementById('completeAndProgressButton');
 
     if (weekAButton) {
@@ -568,30 +525,62 @@ function setupEventListeners() {
 
     if (completeAndProgressButton) {
         completeAndProgressButton.addEventListener('click', () => {
-            const weekDataForButton = workoutData[currentWeek];
-            if (!weekDataForButton || weekDataForButton.length === 0) return;
-            const dayExercisesForButton = weekDataForButton.filter(ex => ex.day && typeof ex.day === 'string' && ex.day.trim() === currentDay);
-            if (dayExercisesForButton.length === 0 || !dayExercisesForButton[currentExerciseIndex]) return;
+            const weekKey = String(currentWeek); // Use consistent weekKey
+            const dayKey = String(currentDay);
 
-            const currentExerciseObject = dayExercisesForButton[currentExerciseIndex];
-            const exerciseName = currentExerciseObject.exercise || currentExerciseObject.name || 'unknown_exercise';
-            const exerciseId = getExerciseIdentifier(currentWeek, currentDay, exerciseName);
+            if (!workoutData[weekKey] || !workoutData[weekKey][dayKey]) return;
+            const dayExerciseBlocks = workoutData[weekKey][dayKey];
+            if (dayExerciseBlocks.length === 0 || !dayExerciseBlocks[currentExerciseIndex]) return;
 
-            let weightToProgress = currentExerciseObject.weight; // Default from Excel
-            if (exerciseId && userModifiedWeights[exerciseId] !== undefined) {
-                weightToProgress = userModifiedWeights[exerciseId];
+            const currentExerciseBlock = dayExerciseBlocks[currentExerciseIndex]; // This is the block
+
+            // Find the first 'Work Set' within this block to apply progression to.
+            const workSetEntry = currentExerciseBlock.sets.find(s => s.SetType && s.SetType.toLowerCase().includes('work'));
+
+            if (!workSetEntry) {
+                alert("No 'Work Set' found for this exercise to apply progression.");
+                console.log("No work set in block:", currentExerciseBlock);
+                return;
             }
 
-            const progressionRule = currentExerciseObject.progression;
+            // Progression rule comes from the block level (taken from the first set during grouping)
+            const progressionRule = currentExerciseBlock.Progression;
+            if (!progressionRule || String(progressionRule).trim() === '') {
+                alert("No progression rule defined for this exercise block.");
+                return;
+            }
+
+            const exerciseName = currentExerciseBlock.ExerciseName || 'unknown_exercise';
+            const exerciseId = getExerciseIdentifier(weekKey, dayKey, exerciseName); // ID for localStorage is based on ExerciseName
+
+            // Weight to progress is from the specific workSetEntry, checking localStorage first for the ExerciseName
+            let weightToProgress = workSetEntry.Weight; // Default from the specific work set's Excel data
+            if (exerciseId && userModifiedWeights[exerciseId] !== undefined) {
+                weightToProgress = userModifiedWeights[exerciseId]; // Stored weight for the overall exercise
+                console.log(`Progressing stored weight for ${exerciseId}: ${weightToProgress}`);
+            } else {
+                console.log(`Progressing default Excel weight for ${exerciseName} (from its work set): ${weightToProgress}`);
+            }
+
             const parsedRule = parseProgressionRule(progressionRule);
 
-            if (exerciseId && parsedRule && weightToProgress) {
+            if (exerciseId && parsedRule && weightToProgress !== null && weightToProgress !== undefined && String(weightToProgress).trim() !== "") {
                 let currentNumericWeight = parseFloat(String(weightToProgress).replace(/[^0-9.]/g, ''));
-                const originalUnit = String(weightToProgress).replace(/[0-9.-]/g, '').trim() || parsedRule.unit; // Prefer original unit, fallback to rule's
+
+                // Determine unit: 1. from weight string, 2. from workSetEntry.Unit, 3. from rule, 4. default 'kg'
+                let unit = 'kg'; // Default
+                const weightMatch = String(weightToProgress).match(/[a-zA-Z]+$/);
+                if (weightMatch) {
+                    unit = weightMatch[0].toLowerCase();
+                } else if (workSetEntry.Unit && String(workSetEntry.Unit).trim() !== '') {
+                    unit = workSetEntry.Unit.toLowerCase();
+                } else if (parsedRule.unit && String(parsedRule.unit).trim() !== '') {
+                    unit = parsedRule.unit.toLowerCase();
+                }
 
                 if (!isNaN(currentNumericWeight)) {
                     const newNumericWeight = currentNumericWeight + parsedRule.amount;
-                    const newWeightString = `${newNumericWeight}${originalUnit}`;
+                    const newWeightString = `${newNumericWeight}${originalUnit}`; // Ensure originalUnit is just the characters
 
                     saveUserWeight(exerciseId, newWeightString);
 
