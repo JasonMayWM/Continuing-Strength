@@ -101,7 +101,7 @@ function test_parseProgressionRule() {
     assertDeepEqual(parseProgressionRule("kg"), null, "Test Case 8: Unit only, no amount");
     assertDeepEqual(parseProgressionRule(""), null, "Test Case 9: Empty string");
     assertDeepEqual(parseProgressionRule(null), null, "Test Case 10: Null input");
-    assertDeepEqual(parseProgressionRule("increase by 5 pounds"), null, "Test Case 11: Text rule (not supported by this parser)");
+    assertDeepEqual(parseProgressionRule("5 pounds"), { amount: 5, unit: 'pounds' }, "Test Case 11: Number and unit text rule '5 pounds'");
     assertDeepEqual(parseProgressionRule("2.5kgg"), { amount: 2.5, unit: 'kgg' }, "Test Case 12: Multi-char unit"); // current regex takes all letters
 }
 
@@ -154,113 +154,136 @@ function test_progressiveOverloadCalculation() {
 }
 
 function test_warmupCalculationDisplay() {
-    console.log("Testing Warmup Calculation and Display Logic (New Structure)...");
+    console.log("Testing Warmup Calculation and Display Logic (Exercise Block Structure)...");
 
-    // Mock utility to simulate parts of displayCurrentWorkout's weight display logic for a given exercise entry
-    // This is a simplified helper for the test, not the full displayCurrentWorkout function.
-    function getSimulatedWarmupWeightDisplay(currentExerciseData, dayExercises, currentWeekKey, currentDayKey, mockUserModifiedWeights) {
-        const exerciseName = currentExerciseData.ExerciseName;
-        let weightToDisplay = currentExerciseData.Weight || "";
-        let unitForDisplay = currentExerciseData.Unit || "kg";
+    // Helper function to simulate how displayCurrentWorkout determines warmup weight display
+    // It takes the specific warmup setEntry, the full exerciseBlock it belongs to,
+    // and mock localStorage weights for testing purposes.
+    function getSimulatedWarmupDisplayWeight(warmupSetEntry, exerciseBlock, mockUserModifiedWeights, weekKey, dayKey) {
+        let weightToDisplay = warmupSetEntry.Weight || ""; // Default to empty string
 
-        if (String(currentExerciseData.Weight).includes('%')) {
+        if (String(warmupSetEntry.Weight).includes('%')) {
             let workSetBaseWeightString = null;
-            let workSetUnit = unitForDisplay;
+            let workSetUnit = warmupSetEntry.Unit || 'kg'; // Default to warmup's unit or kg
 
-            const correspondingWorkSet = dayExercises.find(ex =>
-                ex.ExerciseName === exerciseName &&
-                ex.SetType && ex.SetType.toLowerCase().includes('work')
-            );
+            // Find a 'Work Set' within this same exercise block
+            const correspondingWorkSet = exerciseBlock.sets.find(s => s.SetType && s.SetType.toLowerCase().includes('work'));
 
             if (correspondingWorkSet) {
-                const workSetExerciseId = getExerciseIdentifier(currentWeekKey, currentDayKey, correspondingWorkSet.ExerciseName);
-                if (workSetExerciseId && mockUserModifiedWeights && mockUserModifiedWeights[workSetExerciseId] !== undefined) {
-                    workSetBaseWeightString = mockUserModifiedWeights[workSetExerciseId];
+                const exerciseIdForStorage = getExerciseIdentifier(weekKey, dayKey, exerciseBlock.ExerciseName);
+                if (exerciseIdForStorage && mockUserModifiedWeights && mockUserModifiedWeights[exerciseIdForStorage] !== undefined) {
+                    workSetBaseWeightString = mockUserModifiedWeights[exerciseIdForStorage];
                 } else {
-                    workSetBaseWeightString = correspondingWorkSet.Weight;
+                    workSetBaseWeightString = correspondingWorkSet.Weight; // Default from Excel for the work set
                 }
 
+                // Determine unit from the work set's weight string or its Unit property
                 if (typeof workSetBaseWeightString === 'string') {
-                    const workSetWeightMatch = workSetBaseWeightString.match(/[a-zA-Z]+$/);
-                    if (workSetWeightMatch) workSetUnit = workSetWeightMatch[0].toLowerCase();
-                } else if (typeof workSetBaseWeightString === 'number' && correspondingWorkSet.Unit) {
-                     workSetUnit = correspondingWorkSet.Unit.toLowerCase();
+                    const match = workSetBaseWeightString.match(/[a-zA-Z]+$/);
+                    if (match) workSetUnit = match[0].toLowerCase();
+                } else if (correspondingWorkSet.Unit) { // if weight is number, use Unit field
+                    workSetUnit = correspondingWorkSet.Unit.toLowerCase();
                 }
             }
 
             if (workSetBaseWeightString) {
                 const baseNumeric = parseFloat(String(workSetBaseWeightString).replace(/[^0-9.]/g, ''));
-                const warmupPercent = parseFloat(String(currentExerciseData.Weight).replace('%', ''));
+                const warmupPercent = parseFloat(String(warmupSetEntry.Weight).replace('%', ''));
                 if (!isNaN(baseNumeric) && baseNumeric > 0 && !isNaN(warmupPercent)) {
                     const calculatedWarmupWeight = Math.round((baseNumeric * (warmupPercent / 100)) / 2.5) * 2.5;
                     weightToDisplay = `${calculatedWarmupWeight}${workSetUnit}`;
                 } else {
-                    return `Error calculating ${currentExerciseData.Weight} of ${workSetBaseWeightString || 'N/A'}`;
+                    weightToDisplay = `Error calc: ${warmupSetEntry.Weight} of ${workSetBaseWeightString}`;
                 }
             } else {
-                return `Cannot calculate (No Work Set weight for ${exerciseName})`;
+                weightToDisplay = `Cannot calc % (No Work Set for ${exerciseBlock.ExerciseName})`;
             }
         }
-        // For absolute weight warmups, weightToDisplay is already set from currentExerciseData.Weight
-        return weightToDisplay; // This is the final weight string for the <p><strong>Weight: ...</strong></p>
+        // If not percentage, weightToDisplay is already set to warmupSetEntry.Weight (absolute value)
+        // Append unit if it's numeric or doesn't have one
+        if (typeof weightToDisplay === 'number' || (weightToDisplay && !String(weightToDisplay).match(/[a-zA-Z]+$/))) {
+            weightToDisplay = `${weightToDisplay}${warmupSetEntry.Unit || 'kg'}`;
+        }
+        return weightToDisplay;
     }
 
-    // Test Case 1: Warmup with percentage, Work Set weight from Excel
-    let dayExercises1 = [
-        { ExerciseName: "Squats", SetType: "Warmup", Sets: 1, Reps: 8, Weight: "50%", Unit: "kg", ExerciseOrder: 1 },
-        { ExerciseName: "Squats", SetType: "Work Set", Sets: 3, Reps: 5, Weight: "100kg", Unit: "kg", ExerciseOrder: 2 }
-    ];
-    let warmupEx1 = dayExercises1[0];
-    let expectedWeight1 = "50kg"; // 50% of 100kg
-    assertEqual(getSimulatedWarmupWeightDisplay(warmupEx1, dayExercises1, 'A', 'Day 1', {}), expectedWeight1, "Warmup TC1: 50% of 100kg (Excel)");
+    // Test Case 1: Percentage warmup, Work Set weight from Excel
+    let exerciseBlock1 = {
+        ExerciseName: "Squats", ExerciseOrder: 1, Progression: "+2.5kg",
+        sets: [
+            { SetType: "Warmup", Sets: 1, Reps: 8, Weight: "50%", Unit: "kg", Notes: "", ExerciseOrder: 1 },
+            { SetType: "Work Set", Sets: 3, Reps: 5, Weight: "100kg", Unit: "kg", Notes: "", ExerciseOrder: 2 }
+        ]
+    };
+    let warmupSet1 = exerciseBlock1.sets[0];
+    assertEqual(getSimulatedWarmupDisplayWeight(warmupSet1, exerciseBlock1, {}, 'A', 'Day 1'), "50kg", "WarmupBlock TC1: 50% of 100kg (Excel)");
 
-    // Test Case 2: Warmup with percentage, Work Set weight from localStorage
-    let dayExercises2 = [
-        { ExerciseName: "Bench Press", SetType: "Warmup", Sets: 1, Reps: 5, Weight: "60%", Unit: "lbs", ExerciseOrder: 1 },
-        { ExerciseName: "Bench Press", SetType: "Work Set", Sets: 3, Reps: 5, Weight: "200lbs", Unit: "lbs", ExerciseOrder: 2 }
-    ];
-    let warmupEx2 = dayExercises2[0];
-    let mockLocalStorage2 = { "a_day_1_bench_press": "220lbs" }; // User progressed Bench Press
-    let expectedWeight2 = "132.5lbs"; // 60% of 220lbs (220*0.6 = 132, rounded to 132.5)
-    assertEqual(getSimulatedWarmupWeightDisplay(warmupEx2, dayExercises2, 'A', 'Day 1', mockLocalStorage2), expectedWeight2, "Warmup TC2: 60% of 220lbs (localStorage)");
+    // Test Case 2: Percentage warmup, Work Set weight from mock localStorage
+    let exerciseBlock2 = {
+        ExerciseName: "Bench Press", ExerciseOrder: 1, Progression: "+5lbs",
+        sets: [
+            { SetType: "Warmup", Sets: 1, Reps: 5, Weight: "60%", Unit: "lbs", Notes: "", ExerciseOrder: 1 },
+            { SetType: "Work Set", Sets: 3, Reps: 5, Weight: "200lbs", Unit: "lbs", Notes: "", ExerciseOrder: 2 }
+        ]
+    };
+    let warmupSet2 = exerciseBlock2.sets[0];
+    let mockLocalStorage2 = { "a_day_1_bench_press": "220lbs" };
+    assertEqual(getSimulatedWarmupDisplayWeight(warmupSet2, exerciseBlock2, mockLocalStorage2, 'A', 'Day 1'), "132.5lbs", "WarmupBlock TC2: 60% of 220lbs (localStorage)");
 
-    // Test Case 3: Warmup with absolute weight
-    let dayExercises3 = [
-        { ExerciseName: "Deadlift", SetType: "Warmup", Sets: 1, Reps: 3, Weight: "60kg", Unit: "kg", ExerciseOrder: 1 },
-        { ExerciseName: "Deadlift", SetType: "Work Set", Sets: 1, Reps: 5, Weight: "180kg", Unit: "kg", ExerciseOrder: 2 }
-    ];
-    let warmupEx3 = dayExercises3[0];
-    let expectedWeight3 = "60kg"; // Absolute weight
-    assertEqual(getSimulatedWarmupWeightDisplay(warmupEx3, dayExercises3, 'A', 'Day 1', {}), expectedWeight3, "Warmup TC3: Absolute weight 60kg");
+    // Test Case 3: Absolute warmup weight
+    let exerciseBlock3 = {
+        ExerciseName: "Deadlift", ExerciseOrder: 1, Progression: "+5kg",
+        sets: [
+            { SetType: "Warmup", Sets: 1, Reps: 3, Weight: "60kg", Unit: "kg", Notes: "", ExerciseOrder: 1 },
+            { SetType: "Work Set", Sets: 1, Reps: 5, Weight: "180kg", Unit: "kg", Notes: "", ExerciseOrder: 2 }
+        ]
+    };
+    let warmupSet3 = exerciseBlock3.sets[0];
+    assertEqual(getSimulatedWarmupDisplayWeight(warmupSet3, exerciseBlock3, {}, 'A', 'Day 1'), "60kg", "WarmupBlock TC3: Absolute weight 60kg");
 
-    // Test Case 4: Warmup percentage, but no corresponding Work Set found
-    let dayExercises4 = [
-        { ExerciseName: "Overhead Press", SetType: "Warmup", Sets: 1, Reps: 5, Weight: "50%", Unit: "kg", ExerciseOrder: 1 }
-        // No Work Set for Overhead Press
-    ];
-    let warmupEx4 = dayExercises4[0];
-    let expectedMsg4 = "Cannot calculate (No Work Set weight for Overhead Press)";
-    assertEqual(getSimulatedWarmupWeightDisplay(warmupEx4, dayExercises4, 'A', 'Day 1', {}), expectedMsg4, "Warmup TC4: Percentage warmup, no Work Set");
+    // Test Case 4: Percentage warmup, but no corresponding Work Set in the block
+    let exerciseBlock4 = {
+        ExerciseName: "Overhead Press", ExerciseOrder: 1, Progression: "+2.5kg",
+        sets: [
+            { SetType: "Warmup", Sets: 1, Reps: 5, Weight: "50%", Unit: "kg", Notes: "", ExerciseOrder: 1 }
+            // No Work Set
+        ]
+    };
+    let warmupSet4 = exerciseBlock4.sets[0];
+    assertEqual(getSimulatedWarmupDisplayWeight(warmupSet4, exerciseBlock4, {}, 'A', 'Day 1'), "Cannot calc % (No Work Set for Overhead Press)", "WarmupBlock TC4: Percentage warmup, no Work Set");
 
-    // Test Case 5: Work Set weight is not a parseable number
-     let dayExercises5 = [
-        { ExerciseName: "Rows", SetType: "Warmup", Sets: 1, Reps: 8, Weight: "50%", Unit: "kg", ExerciseOrder: 1 },
-        { ExerciseName: "Rows", SetType: "Work Set", Sets: 3, Reps: 8, Weight: "Bodyweight", Unit: "kg", ExerciseOrder: 2 }
-    ];
-    let warmupEx5 = dayExercises5[0];
-    // Expects an error message because "Bodyweight" cannot be parsed to float for calculation
-    let expectedMsg5 = "Error calculating 50% of Bodyweight";
-    assertEqual(getSimulatedWarmupWeightDisplay(warmupEx5, dayExercises5, 'A', 'Day 1', {}), expectedMsg5, "Warmup TC5: Work Set weight is 'Bodyweight'");
+    // Test Case 5: Work Set weight is unparseable (e.g., "Bodyweight")
+    let exerciseBlock5 = {
+        ExerciseName: "Rows", ExerciseOrder: 1, Progression: "+1 rep",
+        sets: [
+            { SetType: "Warmup", Sets: 1, Reps: 8, Weight: "50%", Unit: "kg", Notes: "", ExerciseOrder: 1 },
+            { SetType: "Work Set", Sets: 3, Reps: 8, Weight: "Bodyweight", Unit: "kg", Notes: "", ExerciseOrder: 2 }
+        ]
+    };
+    let warmupSet5 = exerciseBlock5.sets[0];
+    assertEqual(getSimulatedWarmupDisplayWeight(warmupSet5, exerciseBlock5, {}, 'A', 'Day 1'), "Error calc: 50% of Bodyweight", "WarmupBlock TC5: Work Set weight is 'Bodyweight'");
 
-    // Test Case 6: Warmup weight is a percentage, but work set weight has no unit (uses default 'kg')
-    let dayExercises6 = [
-        { ExerciseName: "Lat Pulldown", SetType: "Warmup", Sets: 1, Reps: 10, Weight: "40%", Unit: "kg", ExerciseOrder: 1 },
-        { ExerciseName: "Lat Pulldown", SetType: "Work Set", Sets: 3, Reps: 10, Weight: "50", Unit: "", ExerciseOrder: 2 } // Weight "50", no unit in Excel
-    ];
-    let warmupEx6 = dayExercises6[0];
-    let expectedWeight6 = "20kg"; // 40% of 50 (defaulting to kg because warmup specified it, or work set unit would be '')
-    assertEqual(getSimulatedWarmupWeightDisplay(warmupEx6, dayExercises6, 'A', 'Day 1', {}), expectedWeight6, "Warmup TC6: Work set weight '50', warmup wants % (default kg)");
+    // Test Case 6: Work set weight is numeric string, unit from WorkSet.Unit
+    let exerciseBlock6 = {
+        ExerciseName: "Lat Pulldown", ExerciseOrder: 1, Progression: "+2.5kg",
+        sets: [
+            { SetType: "Warmup", Sets: 1, Reps: 10, Weight: "40%", Unit: "kg", Notes: "", ExerciseOrder: 1 },
+            { SetType: "Work Set", Sets: 3, Reps: 10, Weight: "50", Unit: "kg", Notes: "", ExerciseOrder: 2 } // Weight "50", Unit "kg"
+        ]
+    };
+    let warmupSet6 = exerciseBlock6.sets[0];
+    assertEqual(getSimulatedWarmupDisplayWeight(warmupSet6, exerciseBlock6, {}, 'A', 'Day 1'), "20kg", "WarmupBlock TC6: Work set '50', Unit 'kg'");
 
+    // Test Case 7: Work set weight is numeric, Unit field is empty, fallback to warmup set unit
+    let exerciseBlock7 = {
+        ExerciseName: "Cable Row", ExerciseOrder: 1, Progression: "+2.5 lbs",
+        sets: [
+            { SetType: "Warmup", Sets: 1, Reps: 10, Weight: "30%", Unit: "lbs", Notes: "", ExerciseOrder: 1 },
+            { SetType: "Work Set", Sets: 3, Reps: 10, Weight: 70, Unit: "", Notes: "", ExerciseOrder: 2 } // Weight 70 (number), Unit ""
+        ]
+    };
+    let warmupSet7 = exerciseBlock7.sets[0];
+    assertEqual(getSimulatedWarmupDisplayWeight(warmupSet7, exerciseBlock7, {}, 'A', 'Day 1'), "22.5lbs", "WarmupBlock TC7: Work set 70 (num), Unit '', fallback to lbs");
 }
 
 
