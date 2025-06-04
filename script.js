@@ -260,7 +260,6 @@ async function loadWorkoutData() {
     }
 }
 
-// Renamed and repurposed: this now displays the filtered workout for the current day and week
 function displayCurrentWorkout() {
     const workoutDetailsDiv = document.getElementById('workout-details');
     const workoutTitleEl = document.getElementById('workout-title');
@@ -270,13 +269,12 @@ function displayCurrentWorkout() {
         return;
     }
 
-    // console.log(`displayCurrentWorkout called. currentWeek: ${currentWeek}, currentDay: ${currentDay}, currentExerciseIndex: ${currentExerciseIndex}`);
-
     const weekKey = String(currentWeek);
     const dayKey = String(currentDay);
 
-    workoutTitleEl.textContent = `Workout: Week ${weekKey} - ${dayKey}`; // Update main title
+    workoutTitleEl.textContent = `Workout: Week ${weekKey} - ${dayKey}`;
 
+    // Single, correct declaration and initial check
     if (!workoutData[weekKey] || !workoutData[weekKey][dayKey]) {
         console.log(`No workout data structure for Week ${weekKey}, Day ${dayKey}.`);
         workoutDetailsDiv.innerHTML = `<p>No workout data available for Week ${weekKey}, ${dayKey}.</p>`;
@@ -284,34 +282,7 @@ function displayCurrentWorkout() {
         return;
     }
 
-    const dayExerciseBlocks = workoutData[weekKey][dayKey]; // Array of exercise blocks
-    // console.log(`Displaying data for Week ${weekKey}, Day ${dayKey}. Found ${dayExerciseBlocks.length} exercise blocks.`);
-    // if(dayExerciseBlocks.length > 0 && currentExerciseIndex < dayExerciseBlocks.length) {
-    //    console.log("Current exercise block to render:", dayExerciseBlocks[currentExerciseIndex]);
-    //} else if (dayExerciseBlocks.length > 0) {
-    //    console.log("currentExerciseIndex might be out of bounds or block is undefined.");
-    //}
-
-    // The following block is a duplicate of the one at lines ~283-287 and is removed.
-    // if (!workoutData[weekKey] || !workoutData[weekKey][dayKey]) {
-    //     workoutDetailsDiv.innerHTML = `<p>No workout data available for Week ${weekKey}, ${dayKey}.</p>`;
-    //     updateNavigationButtons(0);
-    //     return;
-    // }
-
-    // Assuming a column named 'Day' (becomes 'day' key) in the Excel sheet
-    // And its value is like 'Day 1', 'Day 2', etc.
-    // Ensure `exercise.day` exists and is a string before calling trim()
-    // This specific block is being removed as the updated version is below.
-    // const dayExercises = weekData.filter(exercise => exercise.day && typeof exercise.day === 'string' && exercise.day.trim() === currentDay);
-
-    // if (dayExercises.length === 0) {
-    //     workoutDetailsDiv.innerHTML = `<p>No exercises found for Week ${currentWeek}, ${currentDay}.</p>`;
-    //     console.log(`No exercises for Week ${currentWeek}, ${currentDay}. Week data:`, weekData);
-    //     return;
-    // }
-
-    const dayExerciseBlocks = workoutData[weekKey][dayKey]; // Array of exercise blocks. Already defined above.
+    const dayExerciseBlocks = workoutData[weekKey][dayKey]; // This is the ONLY const declaration of dayExerciseBlocks
 
     if (dayExerciseBlocks.length === 0) {
         workoutDetailsDiv.innerHTML = `<p>No exercises scheduled for Week ${weekKey}, ${dayKey}.</p>`;
@@ -331,7 +302,6 @@ function displayCurrentWorkout() {
     }
 
     let htmlContent = `<div class="exercise-block-view">`;
-    // "Displaying exercise X of Y"
     htmlContent += `<h4>Displaying exercise ${currentExerciseIndex + 1} of ${dayExerciseBlocks.length}: ${currentExerciseBlock.ExerciseName}</h4>`;
 
     htmlContent += `<table><thead><tr>
@@ -344,36 +314,33 @@ function displayCurrentWorkout() {
 
     currentExerciseBlock.sets.forEach((setEntry, setIndex) => {
         htmlContent += `<tr>`;
-        // htmlContent += `<td>${setIndex === 0 ? currentExerciseBlock.ExerciseName : ""}</td>`; // Show Exercise Name only for first set row
         htmlContent += `<td>${setEntry.SetType || ""}</td>`;
         htmlContent += `<td>${setEntry.Sets || ""}</td>`;
         htmlContent += `<td>${setEntry.Reps || ""}</td>`;
 
         let weightToDisplay = setEntry.Weight || "";
-        const exerciseIdForStorage = getExerciseIdentifier(weekKey, dayKey, currentExerciseBlock.ExerciseName); // ID for the whole exercise block
+        const exerciseIdForStorage = getExerciseIdentifier(weekKey, dayKey, currentExerciseBlock.ExerciseName);
 
         if (setEntry.SetType && setEntry.SetType.toLowerCase().includes('warmup')) {
             if (String(setEntry.Weight).includes('%')) {
                 let workSetBaseWeightString = null;
-                let workSetUnit = setEntry.Unit || 'kg';
-
-                // Find a 'Work Set' within this same exercise block
+                let workSetUnit = setEntry.Unit || 'kg'; // Default unit for calculation if workset unit not found
                 const correspondingWorkSet = currentExerciseBlock.sets.find(s => s.SetType && s.SetType.toLowerCase().includes('work'));
 
                 if (correspondingWorkSet) {
-                    // For work set weight, prioritize localStorage for the main exercise name
                     if (exerciseIdForStorage && userModifiedWeights[exerciseIdForStorage] !== undefined) {
                         workSetBaseWeightString = userModifiedWeights[exerciseIdForStorage];
                     } else {
-                        workSetBaseWeightString = correspondingWorkSet.Weight; // Default from Excel for the work set
+                        workSetBaseWeightString = correspondingWorkSet.Weight;
                     }
 
+                    // Determine unit from the work set's weight string or its Unit property
                     if (typeof workSetBaseWeightString === 'string') {
                         const match = workSetBaseWeightString.match(/[a-zA-Z]+$/);
                         if (match) workSetUnit = match[0].toLowerCase();
-                    } else if (correspondingWorkSet.Unit) {
+                    } else if (correspondingWorkSet.Unit && String(correspondingWorkSet.Unit).trim() !== '') {
                         workSetUnit = correspondingWorkSet.Unit.toLowerCase();
-                    }
+                    } // else workSetUnit remains default from warmup or 'kg'
                 }
 
                 if (workSetBaseWeightString) {
@@ -381,7 +348,7 @@ function displayCurrentWorkout() {
                     const warmupPercent = parseFloat(String(setEntry.Weight).replace('%', ''));
                     if (!isNaN(baseNumeric) && baseNumeric > 0 && !isNaN(warmupPercent)) {
                         const calculatedWarmupWeight = Math.round((baseNumeric * (warmupPercent / 100)) / 2.5) * 2.5;
-                        weightToDisplay = `${calculatedWarmupWeight}${workSetUnit}`;
+                        weightToDisplay = `${calculatedWarmupWeight}${workSetUnit}`; // Use determined workSetUnit
                     } else {
                         weightToDisplay = `Error calc: ${setEntry.Weight} of ${workSetBaseWeightString}`;
                     }
@@ -389,21 +356,20 @@ function displayCurrentWorkout() {
                     weightToDisplay = `Cannot calc % (No Work Set for ${currentExerciseBlock.ExerciseName})`;
                 }
             }
-            // Absolute warmup weights are already in setEntry.Weight
+            // For absolute warmup weights, unit appending will be handled by the generic logic below
         } else if (setEntry.SetType && setEntry.SetType.toLowerCase().includes('work')) {
-            // For 'Work Set', prioritize localStorage weight for the main exercise name
             if (exerciseIdForStorage && userModifiedWeights[exerciseIdForStorage] !== undefined) {
                 weightToDisplay = userModifiedWeights[exerciseIdForStorage];
             }
-            // If not in localStorage, setEntry.Weight (which is already in weightToDisplay) is used.
-            // Append unit if not already part of the weight string
-            if (typeof weightToDisplay === 'number' || !String(weightToDisplay).match(/[a-zA-Z]+$/)) {
-                 weightToDisplay = `${weightToDisplay}${setEntry.Unit || 'kg'}`;
-            }
-        } else { // Other set types, or if SetType is missing
-             if (typeof weightToDisplay === 'number' || (weightToDisplay && !String(weightToDisplay).match(/[a-zA-Z]+$/))) {
-                 weightToDisplay = `${weightToDisplay}${setEntry.Unit || 'kg'}`;
-            }
+            // If not in localStorage, setEntry.Weight (already in weightToDisplay) is used from Excel.
+            // Unit appending handled below.
+        }
+
+        // Universal unit appending logic for weights that are numbers or don't have units yet,
+        // and are not error messages.
+        const isErrorMsg = String(weightToDisplay).startsWith("Error calc") || String(weightToDisplay).startsWith("Cannot calc");
+        if (!isErrorMsg && (typeof weightToDisplay === 'number' || (weightToDisplay && !String(weightToDisplay).match(/[a-zA-Z]+$/i)))) {
+             weightToDisplay = `${weightToDisplay}${setEntry.Unit || 'kg'}`;
         }
 
         htmlContent += `<td>${weightToDisplay}</td>`;
@@ -413,18 +379,16 @@ function displayCurrentWorkout() {
 
     htmlContent += `</tbody></table>`;
 
-    // Display Progression for the entire exercise block
     const progressionRuleString = currentExerciseBlock.Progression;
     if (progressionRuleString && String(progressionRuleString).trim() !== '') {
-        let displayProgression = progressionRuleString; // Default to raw string
+        let displayProgression = progressionRuleString;
         const parsedProgRule = parseProgressionRule(progressionRuleString);
         if (parsedProgRule) {
-            // Format it: ensure sign is present for positive numbers, and unit is appended
             let amountStr = String(parsedProgRule.amount);
             if (parsedProgRule.amount > 0 && !amountStr.startsWith('+')) {
                 amountStr = `+${amountStr}`;
             }
-            const unitStr = parsedProgRule.unit || 'kg'; // Default to kg if unit is empty from parse
+            const unitStr = parsedProgRule.unit || 'kg';
             displayProgression = `${amountStr}${unitStr}`;
         }
         htmlContent += `<p style="margin-top:10px;"><strong>Progression for ${currentExerciseBlock.ExerciseName}:</strong> <span id="progressionRuleText">${displayProgression}</span></p>`;
@@ -433,10 +397,9 @@ function displayCurrentWorkout() {
     htmlContent += `</div>`;
     workoutDetailsDiv.innerHTML = htmlContent;
 
-    updateNavigationButtons(dayExerciseBlocks.length); // Pass length of exercise blocks array
+    updateNavigationButtons(dayExerciseBlocks.length);
 }
 
-// Placeholder for updateNavigationButtons - will be implemented in Part 2
 function updateNavigationButtons(totalExercisesToday) {
     const prevButton = document.getElementById('prevExerciseButton');
     const nextButton = document.getElementById('nextExerciseButton');
@@ -592,7 +555,6 @@ function setupEventListeners() {
 
             const currentExerciseBlock = dayExerciseBlocksArr[currentExerciseIndex];
 
-            // Find the first 'Work Set' within this block to apply progression to.
             const workSetEntry = currentExerciseBlock.sets.find(s => s.SetType && s.SetType.toLowerCase().includes('work'));
 
             if (!workSetEntry) {
@@ -601,7 +563,6 @@ function setupEventListeners() {
                 return;
             }
 
-            // Progression rule comes from the block level (taken from the first set during grouping)
             const progressionRule = currentExerciseBlock.Progression;
             if (!progressionRule || String(progressionRule).trim() === '') {
                 alert("No progression rule defined for this exercise block.");
@@ -609,12 +570,11 @@ function setupEventListeners() {
             }
 
             const exerciseName = currentExerciseBlock.ExerciseName || 'unknown_exercise';
-            const exerciseId = getExerciseIdentifier(weekKey, dayKey, exerciseName); // ID for localStorage is based on ExerciseName
+            const exerciseId = getExerciseIdentifier(weekKey, dayKey, exerciseName);
 
-            // Weight to progress is from the specific workSetEntry, checking localStorage first for the ExerciseName
-            let weightToProgress = workSetEntry.Weight; // Default from the specific work set's Excel data
+            let weightToProgress = workSetEntry.Weight;
             if (exerciseId && userModifiedWeights[exerciseId] !== undefined) {
-                weightToProgress = userModifiedWeights[exerciseId]; // Stored weight for the overall exercise
+                weightToProgress = userModifiedWeights[exerciseId];
                 console.log(`Progressing stored weight for ${exerciseId}: ${weightToProgress}`);
             } else {
                 console.log(`Progressing default Excel weight for ${exerciseName} (from its work set): ${weightToProgress}`);
@@ -625,8 +585,7 @@ function setupEventListeners() {
             if (exerciseId && parsedRule && weightToProgress !== null && weightToProgress !== undefined && String(weightToProgress).trim() !== "") {
                 let currentNumericWeight = parseFloat(String(weightToProgress).replace(/[^0-9.]/g, ''));
 
-                // Determine unit: 1. from weight string, 2. from workSetEntry.Unit, 3. from rule, 4. default 'kg'
-                let unit = 'kg'; // Default
+                let unit = 'kg';
                 const weightMatch = String(weightToProgress).match(/[a-zA-Z]+$/);
                 if (weightMatch) {
                     unit = weightMatch[0].toLowerCase();
