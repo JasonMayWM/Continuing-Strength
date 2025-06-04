@@ -292,12 +292,12 @@ function displayCurrentWorkout() {
     //    console.log("currentExerciseIndex might be out of bounds or block is undefined.");
     //}
 
-
-    if (!workoutData[weekKey] || !workoutData[weekKey][dayKey]) {
-        workoutDetailsDiv.innerHTML = `<p>No workout data available for Week ${weekKey}, ${dayKey}.</p>`;
-        updateNavigationButtons(0);
-        return;
-    }
+    // The following block is a duplicate of the one at lines ~283-287 and is removed.
+    // if (!workoutData[weekKey] || !workoutData[weekKey][dayKey]) {
+    //     workoutDetailsDiv.innerHTML = `<p>No workout data available for Week ${weekKey}, ${dayKey}.</p>`;
+    //     updateNavigationButtons(0);
+    //     return;
+    // }
 
     // Assuming a column named 'Day' (becomes 'day' key) in the Excel sheet
     // And its value is like 'Day 1', 'Day 2', etc.
@@ -553,8 +553,8 @@ function setupEventListeners() {
             const weekKey = String(currentWeek);
             const dayKey = String(currentDay);
             if (workoutData[weekKey] && workoutData[weekKey][dayKey]) {
-                const dayExerciseBlocks = workoutData[weekKey][dayKey]; // This is the array of blocks
-                if (currentExerciseIndex < dayExerciseBlocks.length - 1) {
+                const dayExerciseBlocksArr = workoutData[weekKey][dayKey]; // Use distinct name
+                if (currentExerciseIndex < dayExerciseBlocksArr.length - 1) {
                     currentExerciseIndex++;
                     console.log(`Navigated to Next Exercise: Index ${currentExerciseIndex}`);
                     displayCurrentWorkout();
@@ -562,7 +562,6 @@ function setupEventListeners() {
                     console.log("Already at the last exercise for the day.");
                     const detailsDiv = document.getElementById('workout-details');
                     if (detailsDiv) {
-                         // Append message only if not already there to avoid duplicates on multiple clicks
                         if (!detailsDiv.querySelector('.end-workout-message')) {
                             const endMsg = document.createElement('p');
                             endMsg.className = 'end-workout-message';
@@ -584,14 +583,14 @@ function setupEventListeners() {
 
     if (completeAndProgressButton) {
         completeAndProgressButton.addEventListener('click', () => {
-            const weekKey = String(currentWeek); // Use consistent weekKey
+            const weekKey = String(currentWeek);
             const dayKey = String(currentDay);
 
             if (!workoutData[weekKey] || !workoutData[weekKey][dayKey]) return;
-            const dayExerciseBlocks = workoutData[weekKey][dayKey];
-            if (dayExerciseBlocks.length === 0 || !dayExerciseBlocks[currentExerciseIndex]) return;
+            const dayExerciseBlocksArr = workoutData[weekKey][dayKey]; // Use distinct name
+            if (dayExerciseBlocksArr.length === 0 || !dayExerciseBlocksArr[currentExerciseIndex]) return;
 
-            const currentExerciseBlock = dayExerciseBlocks[currentExerciseIndex]; // This is the block
+            const currentExerciseBlock = dayExerciseBlocksArr[currentExerciseIndex];
 
             // Find the first 'Work Set' within this block to apply progression to.
             const workSetEntry = currentExerciseBlock.sets.find(s => s.SetType && s.SetType.toLowerCase().includes('work'));
@@ -639,28 +638,29 @@ function setupEventListeners() {
 
                 if (!isNaN(currentNumericWeight)) {
                     const newNumericWeight = currentNumericWeight + parsedRule.amount;
-                    const newWeightString = `${newNumericWeight}${originalUnit}`; // Ensure originalUnit is just the characters
+                    const newWeightString = `${newNumericWeight}${unit}`; // Use the determined 'unit'
 
                     saveUserWeight(exerciseId, newWeightString);
 
-                    // Feedback & Navigation
                     const feedbackEl = document.createElement('p');
                     feedbackEl.textContent = `Weight for ${exerciseName} updated to ${newWeightString}!`;
                     feedbackEl.style.color = 'green';
                     feedbackEl.style.textAlign = 'center';
-                    workoutDetailsDiv.appendChild(feedbackEl);
+                    const detailsDiv = document.getElementById('workout-details');
+                    if (detailsDiv) detailsDiv.appendChild(feedbackEl);
                     setTimeout(() => { feedbackEl.remove(); }, 3000);
 
-                    // Navigate to next
-                    if (currentExerciseIndex < dayExercisesForButton.length - 1) {
+                    completeAndProgressButton.disabled = true;
+
+                    if (currentExerciseIndex < dayExerciseBlocksArr.length - 1) { // Use correct array name for length check
                         currentExerciseIndex++;
                         displayCurrentWorkout();
                     } else {
-                        // workoutDetailsDiv.innerHTML += '<p style="text-align:center; font-weight:bold; margin-top:20px;">Workout Complete! All exercises progressed.</p>';
-                        nextExerciseButton.click(); // Simulate click on next to show "End of workout"
-                        updateNavigationButtons(dayExercisesForButton.length); // Ensure buttons are correctly disabled
+                        nextExerciseButton.click();
+                        if (currentExerciseIndex >= dayExerciseBlocksArr.length - 1) { // Use correct array name for length check
+                             updateNavigationButtons(dayExerciseBlocksArr.length); // Use correct array name for length
+                        }
                     }
-
                 } else {
                     alert("Could not parse current weight to apply progression.");
                 }
