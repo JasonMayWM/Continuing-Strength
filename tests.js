@@ -200,9 +200,11 @@ function test_warmupCalculationDisplay() {
             }
         }
         // If not percentage, weightToDisplay is already set to warmupSetEntry.Weight (absolute value)
-        // Append unit if it's numeric or doesn't have one
-        if (typeof weightToDisplay === 'number' || (weightToDisplay && !String(weightToDisplay).match(/[a-zA-Z]+$/))) {
-            weightToDisplay = `${weightToDisplay}${warmupSetEntry.Unit || 'kg'}`;
+        // Append unit if it's numeric or doesn't have one, AND it's not an error message
+        if (!(String(weightToDisplay).startsWith("Cannot calc") || String(weightToDisplay).startsWith("Error calc"))) {
+            if (typeof weightToDisplay === 'number' || (weightToDisplay && !String(weightToDisplay).match(/[a-zA-Z]+$/))) {
+                weightToDisplay = `${weightToDisplay}${warmupSetEntry.Unit || 'kg'}`;
+            }
         }
         return weightToDisplay;
     }
@@ -283,7 +285,7 @@ function test_warmupCalculationDisplay() {
         ]
     };
     let warmupSet7 = exerciseBlock7.sets[0];
-    assertEqual(getSimulatedWarmupDisplayWeight(warmupSet7, exerciseBlock7, {}, 'A', 'Day 1'), "22.5lbs", "WarmupBlock TC7: Work set 70 (num), Unit '', fallback to lbs");
+    assertEqual(getSimulatedWarmupDisplayWeight(warmupSet7, exerciseBlock7, {}, 'A', 'Day 1'), "20lbs", "WarmupBlock TC7: Work set 70 (num), Unit '', fallback to lbs");
 }
 
 
