@@ -270,12 +270,32 @@ function displayCurrentWorkout() {
         return;
     }
 
-    workoutTitleEl.textContent = `Workout: Week ${currentWeek} - ${currentDay}`;
+    // console.log(`displayCurrentWorkout called. currentWeek: ${currentWeek}, currentDay: ${currentDay}, currentExerciseIndex: ${currentExerciseIndex}`);
 
-    const weekData = workoutData[currentWeek];
-    if (!weekData || weekData.length === 0) {
-        workoutDetailsDiv.innerHTML = `<p>No workout data available for Week ${currentWeek}.</p>`;
-        console.log(`No data for Week ${currentWeek}. Full data:`, workoutData);
+    const weekKey = String(currentWeek);
+    const dayKey = String(currentDay);
+
+    workoutTitleEl.textContent = `Workout: Week ${weekKey} - ${dayKey}`; // Update main title
+
+    if (!workoutData[weekKey] || !workoutData[weekKey][dayKey]) {
+        console.log(`No workout data structure for Week ${weekKey}, Day ${dayKey}.`);
+        workoutDetailsDiv.innerHTML = `<p>No workout data available for Week ${weekKey}, ${dayKey}.</p>`;
+        updateNavigationButtons(0);
+        return;
+    }
+
+    const dayExerciseBlocks = workoutData[weekKey][dayKey]; // Array of exercise blocks
+    // console.log(`Displaying data for Week ${weekKey}, Day ${dayKey}. Found ${dayExerciseBlocks.length} exercise blocks.`);
+    // if(dayExerciseBlocks.length > 0 && currentExerciseIndex < dayExerciseBlocks.length) {
+    //    console.log("Current exercise block to render:", dayExerciseBlocks[currentExerciseIndex]);
+    //} else if (dayExerciseBlocks.length > 0) {
+    //    console.log("currentExerciseIndex might be out of bounds or block is undefined.");
+    //}
+
+
+    if (!workoutData[weekKey] || !workoutData[weekKey][dayKey]) {
+        workoutDetailsDiv.innerHTML = `<p>No workout data available for Week ${weekKey}, ${dayKey}.</p>`;
+        updateNavigationButtons(0);
         return;
     }
 
@@ -291,18 +311,7 @@ function displayCurrentWorkout() {
     //     return;
     // }
 
-    const weekKey = String(currentWeek);
-    const dayKey = String(currentDay);
-
-    workoutTitleEl.textContent = `Workout: Week ${weekKey} - ${dayKey}`; // Update main title
-
-    if (!workoutData[weekKey] || !workoutData[weekKey][dayKey]) {
-        workoutDetailsDiv.innerHTML = `<p>No workout data available for Week ${weekKey}, ${dayKey}.</p>`;
-        updateNavigationButtons(0);
-        return;
-    }
-
-    const dayExerciseBlocks = workoutData[weekKey][dayKey]; // Array of exercise blocks
+    const dayExerciseBlocks = workoutData[weekKey][dayKey]; // Array of exercise blocks. Already defined above.
 
     if (dayExerciseBlocks.length === 0) {
         workoutDetailsDiv.innerHTML = `<p>No exercises scheduled for Week ${weekKey}, ${dayKey}.</p>`;
@@ -405,8 +414,20 @@ function displayCurrentWorkout() {
     htmlContent += `</tbody></table>`;
 
     // Display Progression for the entire exercise block
-    if (currentExerciseBlock.Progression && String(currentExerciseBlock.Progression).trim() !== '') {
-        htmlContent += `<p style="margin-top:10px;"><strong>Progression for ${currentExerciseBlock.ExerciseName}:</strong> <span id="progressionRuleText">${currentExerciseBlock.Progression}</span></p>`;
+    const progressionRuleString = currentExerciseBlock.Progression;
+    if (progressionRuleString && String(progressionRuleString).trim() !== '') {
+        let displayProgression = progressionRuleString; // Default to raw string
+        const parsedProgRule = parseProgressionRule(progressionRuleString);
+        if (parsedProgRule) {
+            // Format it: ensure sign is present for positive numbers, and unit is appended
+            let amountStr = String(parsedProgRule.amount);
+            if (parsedProgRule.amount > 0 && !amountStr.startsWith('+')) {
+                amountStr = `+${amountStr}`;
+            }
+            const unitStr = parsedProgRule.unit || 'kg'; // Default to kg if unit is empty from parse
+            displayProgression = `${amountStr}${unitStr}`;
+        }
+        htmlContent += `<p style="margin-top:10px;"><strong>Progression for ${currentExerciseBlock.ExerciseName}:</strong> <span id="progressionRuleText">${displayProgression}</span></p>`;
     }
 
     htmlContent += `</div>`;
@@ -432,19 +453,44 @@ function updateNavigationButtons(totalExercisesToday) {
 
     // Enable "Complete & Progress" only for 'Work Set' type exercises that have a progression rule
     let enableProgressButton = false;
-    if (totalExercisesToday > 0 && currentExerciseIndex < totalExercisesToday) {
+    let currentExerciseBlockName = "N/A";
+    let currentBlockProgression = "N/A";
+    let blockHasWorkSet = false;
+    let blockHasProgressionRule = false;
+
+    if (totalExercisesToday > 0 && currentExerciseIndex >= 0 && currentExerciseIndex < totalExercisesToday) {
         const weekKey = String(currentWeek);
         const dayKey = String(currentDay);
+
         if (workoutData[weekKey] && workoutData[weekKey][dayKey] && workoutData[weekKey][dayKey][currentExerciseIndex]) {
-            const currentExData = workoutData[weekKey][dayKey][currentExerciseIndex];
-            if (currentExData.SetType && currentExData.SetType.toLowerCase().includes('work') &&
-                currentExData.Progression && String(currentExData.Progression).trim() !== '') {
+            const currentExerciseBlock = workoutData[weekKey][dayKey][currentExerciseIndex];
+            currentExerciseBlockName = currentExerciseBlock.ExerciseName; // For logging
+            currentBlockProgression = currentExerciseBlock.Progression; // For logging
+
+            if (currentExerciseBlock && currentExerciseBlock.sets) {
+                blockHasWorkSet = currentExerciseBlock.sets.some(set => set.SetType && set.SetType.toLowerCase().includes('work'));
+            }
+
+            if (currentExerciseBlock.Progression && String(currentExerciseBlock.Progression).trim() !== "") {
+                blockHasProgressionRule = true;
+            }
+
+            if (blockHasWorkSet && blockHasProgressionRule) {
                 enableProgressButton = true;
             }
         }
     }
+
+    // Temporary console logging for debugging
+    // console.log(`updateNavButtons: ExName: ${currentExerciseBlockName}, Index: ${currentExerciseIndex}`);
+    // console.log(`updateNavButtons: HasWorkSet: ${blockHasWorkSet}, HasProgRule: ${blockHasProgressionRule}`);
+    // console.log(`updateNavButtons: Enabling Progress Button: ${enableProgressButton}`);
+
     if (completeAndProgressButton) {
         completeAndProgressButton.disabled = !enableProgressButton;
+        // console.log(`updateNavButtons: Button disabled state: ${completeAndProgressButton.disabled}`);
+    } else {
+        // console.log("updateNavButtons: Complete & Progress button not found in DOM.");
     }
 }
 
@@ -494,6 +540,9 @@ function setupEventListeners() {
                 console.log(`Navigated to Previous Exercise: Index ${currentExerciseIndex}`);
                 displayCurrentWorkout();
             }
+            // Call updateNavigationButtons explicitly here in case displayCurrentWorkout doesn't run due to an early return
+            // Although, if currentExerciseIndex was > 0, displayCurrentWorkout should ideally always run.
+            // However, updateNavigationButtons is also called at the end of displayCurrentWorkout.
         });
     } else {
         console.warn("Previous Exercise button not found");
@@ -501,22 +550,32 @@ function setupEventListeners() {
 
     if (nextExerciseButton) {
         nextExerciseButton.addEventListener('click', () => {
-            // Get total exercises for the current day to check bounds
-            const weekData = workoutData[currentWeek];
-            if (weekData && weekData.length > 0) {
-                const dayExercises = weekData.filter(exercise => exercise.day && typeof exercise.day === 'string' && exercise.day.trim() === currentDay);
-                if (currentExerciseIndex < dayExercises.length - 1) {
+            const weekKey = String(currentWeek);
+            const dayKey = String(currentDay);
+            if (workoutData[weekKey] && workoutData[weekKey][dayKey]) {
+                const dayExerciseBlocks = workoutData[weekKey][dayKey]; // This is the array of blocks
+                if (currentExerciseIndex < dayExerciseBlocks.length - 1) {
                     currentExerciseIndex++;
                     console.log(`Navigated to Next Exercise: Index ${currentExerciseIndex}`);
                     displayCurrentWorkout();
                 } else {
                     console.log("Already at the last exercise for the day.");
-                    // Optionally, display "Workout Complete" or loop
-                    workoutDetailsDiv = document.getElementById('workout-details');
-                    if (workoutDetailsDiv) {
-                         workoutDetailsDiv.innerHTML += '<p style="text-align:center; font-weight:bold; margin-top:20px;">End of workout for the day!</p>';
+                    const detailsDiv = document.getElementById('workout-details');
+                    if (detailsDiv) {
+                         // Append message only if not already there to avoid duplicates on multiple clicks
+                        if (!detailsDiv.querySelector('.end-workout-message')) {
+                            const endMsg = document.createElement('p');
+                            endMsg.className = 'end-workout-message';
+                            endMsg.style.textAlign = 'center';
+                            endMsg.style.fontWeight = 'bold';
+                            endMsg.style.marginTop = '20px';
+                            endMsg.textContent = 'End of workout for the day!';
+                            detailsDiv.appendChild(endMsg);
+                        }
                     }
                 }
+            } else {
+                console.warn(`No data found for week ${weekKey}, day ${dayKey} when clicking next.`);
             }
         });
     } else {
