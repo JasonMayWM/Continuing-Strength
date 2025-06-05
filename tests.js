@@ -97,12 +97,16 @@ function test_parseProgressionRule() {
     assertDeepEqual(parseProgressionRule("+ 2.5 kg"), { amount: 2.5, unit: 'kg' }, "Test Case 4: Space after sign");
     assertDeepEqual(parseProgressionRule("0kg"), { amount: 0, unit: 'kg' }, "Test Case 5: Zero amount");
     assertDeepEqual(parseProgressionRule("10 KG"), { amount: 10, unit: 'kg' }, "Test Case 6: Uppercase unit");
-    assertDeepEqual(parseProgressionRule("+2.5"), null, "Test Case 7: Amount only, no unit (should fail parsing)"); // Based on current stricter rule
+    assertDeepEqual(parseProgressionRule("+2.5"), { amount: 2.5, unit: 'kg' }, "Test Case 7: Amount only (+2.5), defaults to kg");
     assertDeepEqual(parseProgressionRule("kg"), null, "Test Case 8: Unit only, no amount");
     assertDeepEqual(parseProgressionRule(""), null, "Test Case 9: Empty string");
     assertDeepEqual(parseProgressionRule(null), null, "Test Case 10: Null input");
     assertDeepEqual(parseProgressionRule("5 pounds"), { amount: 5, unit: 'pounds' }, "Test Case 11: Number and unit text rule '5 pounds'");
     assertDeepEqual(parseProgressionRule("2.5kgg"), { amount: 2.5, unit: 'kgg' }, "Test Case 12: Multi-char unit"); // current regex takes all letters
+    assertDeepEqual(parseProgressionRule("1"), { amount: 1, unit: 'kg' }, "Test Case 13: Positive integer only, defaults to kg");
+    assertDeepEqual(parseProgressionRule("-3"), { amount: -3, unit: 'kg' }, "Test Case 14: Negative integer only, defaults to kg");
+    assertDeepEqual(parseProgressionRule("0"), { amount: 0, unit: 'kg' }, "Test Case 15: Zero only, defaults to kg");
+    assertDeepEqual(parseProgressionRule(" 2 "), { amount: 2, unit: 'kg' }, "Test Case 16: Number with spaces, defaults to kg");
 }
 
 function test_progressiveOverloadCalculation() {

@@ -26,14 +26,23 @@ function getExerciseIdentifier(week, day, exerciseName) {
 
 function parseProgressionRule(ruleString) {
     if (!ruleString || typeof ruleString !== 'string') return null;
-    // Matches patterns like "+2.5kg", "-5lbs", "2.5 lbs", "+ 2.5 kg"
-    const match = ruleString.match(/([+-]?\s*\d*\.?\d+)\s*([a-zA-Z]+)/);
-    if (match && match[1] && match[2]) {
-        const amount = parseFloat(match[1].replace(/\s/g, ''));
-        const unit = match[2].toLowerCase();
+
+    // Try to match number + unit (e.g., "+2.5kg", "5lbs")
+    const numAndUnitMatch = ruleString.match(/([+-]?\s*\d*\.?\d+)\s*([a-zA-Z]+)/);
+    if (numAndUnitMatch && numAndUnitMatch[1] && numAndUnitMatch[2]) {
+        const amount = parseFloat(numAndUnitMatch[1].replace(/\s/g, ''));
+        const unit = numAndUnitMatch[2].toLowerCase();
         return { amount, unit };
     }
-    return null; // Return null if parsing fails
+
+    // If not matched, try to match number only (e.g., "+2.5", "1", "-2")
+    const numOnlyMatch = ruleString.match(/^([+-]?\s*\d*\.?\d+)$/);
+    if (numOnlyMatch && numOnlyMatch[1]) {
+        const amount = parseFloat(numOnlyMatch[1].replace(/\s/g, ''));
+        return { amount, unit: 'kg' }; // Default unit to 'kg'
+    }
+
+    return null; // Return null if neither pattern matches
 }
 
 function loadUserWeights() {
