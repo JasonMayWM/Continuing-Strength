@@ -35,9 +35,15 @@ function parseProgressionRule(ruleString) {
         return { amount, unit };
     }
 
-    // If not matched, try to match number only (e.g., "+2.5", "1", "-2")
-    const numOnlyMatch = ruleString.match(/^([+-]?\s*\d*\.?\d+)$/);
+    // If not matched, try to match number only (e.g., "+2.5", "1", "-2", " 2 ")
+    // Regex updated to allow leading/trailing whitespace around the number.
+    const numOnlyMatch = ruleString.match(/^\s*([+-]?\s*\d*\.?\d+)\s*$/);
     if (numOnlyMatch && numOnlyMatch[1]) {
+        // numOnlyMatch[1] will be the number, possibly with internal spaces if the inner \s* allows.
+        // parseFloat will handle leading/trailing spaces of the captured number string itself.
+        // .replace(/\s/g, '') is good for any internal spaces if the regex was more complex,
+        // but for this specific capture, parseFloat is often enough.
+        // Keeping .replace for robustness with the internal \s*.
         const amount = parseFloat(numOnlyMatch[1].replace(/\s/g, ''));
         return { amount, unit: 'kg' }; // Default unit to 'kg'
     }
@@ -205,27 +211,37 @@ async function loadWorkoutData() {
                         if (currentExerciseBlock) {
                             groupedExercisesArray.push(currentExerciseBlock);
                         }
+                        if (currentExerciseBlock) {
+                            // Finalize progression for the completed block BEFORE pushing
+                            const workSetForProgression = currentExerciseBlock.sets.find(s => s.SetType && s.SetType.toLowerCase().includes('work'));
+                            if (workSetForProgression) {
+                                currentExerciseBlock.Progression = workSetForProgression.Progression || "";
+                            } else {
+                                // If no work set, ensure Progression is blank or as initialized
+                                currentExerciseBlock.Progression = currentExerciseBlock.Progression || "";
+                            }
+                            groupedExercisesArray.push(currentExerciseBlock);
+                        }
                         currentExerciseBlock = {
                             ExerciseName: setEntry.ExerciseName,
-                            ExerciseOrder: setEntry.ExerciseOrder, // Assumes ExerciseOrder is consistent for sets of the same exercise
-                            // Add other top-level exercise properties here if they exist and are consistent
-                            // e.g., Progression, overall Notes for the exercise, etc.
-                            // For now, these are assumed to be per-set or handled differently.
-                            // We might need to pull Progression from the first 'Work Set' later if needed at this level.
-                            Progression: setEntry.Progression, // Taking from first set for now
+                            ExerciseOrder: setEntry.ExerciseOrder,
+                            Progression: "", // Initialize as empty; will be sourced from the first work set
                             sets: [setEntry]
                         };
                     } else {
                         currentExerciseBlock.sets.push(setEntry);
-                        // Consolidate progression: if later sets have progression, it might apply to the whole exercise
-                        // For now, the first set's progression is taken. This might need refinement.
-                        if (!currentExerciseBlock.Progression && setEntry.Progression) {
-                            currentExerciseBlock.Progression = setEntry.Progression;
-                        }
+                        // Note: Progression is now determined once the block is complete.
+                        // No need to try and update it during set accumulation here.
                     }
                 });
 
-                if (currentExerciseBlock) { // Push the last exercise block
+                if (currentExerciseBlock) { // Handle the last block
+                    const workSetForProgression = currentExerciseBlock.sets.find(s => s.SetType && s.SetType.toLowerCase().includes('work'));
+                    if (workSetForProgression) {
+                        currentExerciseBlock.Progression = workSetForProgression.Progression || "";
+                    } else {
+                        currentExerciseBlock.Progression = currentExerciseBlock.Progression || ""; // Or ensure it's just ""
+                    }
                     groupedExercisesArray.push(currentExerciseBlock);
                 }
 
