@@ -215,10 +215,10 @@ async function loadWorkoutData() {
                             // Finalize progression for the completed block BEFORE pushing
                             const workSetForProgression = currentExerciseBlock.sets.find(s => s.SetType && s.SetType.toLowerCase().includes('work'));
                             if (workSetForProgression) {
-                                currentExerciseBlock.Progression = workSetForProgression.Progression || "";
+                                currentExerciseBlock.Progression = String(workSetForProgression.Progression || "").trim();
                             } else {
                                 // If no work set, ensure Progression is blank or as initialized
-                                currentExerciseBlock.Progression = currentExerciseBlock.Progression || "";
+                                currentExerciseBlock.Progression = String(currentExerciseBlock.Progression || "").trim();
                             }
                             groupedExercisesArray.push(currentExerciseBlock);
                         }
@@ -238,9 +238,9 @@ async function loadWorkoutData() {
                 if (currentExerciseBlock) { // Handle the last block
                     const workSetForProgression = currentExerciseBlock.sets.find(s => s.SetType && s.SetType.toLowerCase().includes('work'));
                     if (workSetForProgression) {
-                        currentExerciseBlock.Progression = workSetForProgression.Progression || "";
+                        currentExerciseBlock.Progression = String(workSetForProgression.Progression || "").trim();
                     } else {
-                        currentExerciseBlock.Progression = currentExerciseBlock.Progression || ""; // Or ensure it's just ""
+                        currentExerciseBlock.Progression = String(currentExerciseBlock.Progression || "").trim(); // Or ensure it's just ""
                     }
                     groupedExercisesArray.push(currentExerciseBlock);
                 }
