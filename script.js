@@ -206,44 +206,53 @@ async function loadWorkoutData() {
                     continue;
                 }
 
+                // THIS IS THE LOOP TO MODIFY/REPLACE:
                 individualSetsArray.forEach(setEntry => {
-                    if (!currentExerciseBlock || setEntry.ExerciseName !== currentExerciseBlock.ExerciseName) {
+                    let isNewExercise = false;
+                    let currentBlockNameForLog = currentExerciseBlock ? currentExerciseBlock.ExerciseName : 'null';
+
+                    if (!currentExerciseBlock) {
+                        isNewExercise = true;
+                    } else if (typeof setEntry.ExerciseName !== 'string' || typeof currentExerciseBlock.ExerciseName !== 'string') {
+                        isNewExercise = true;
+                        console.warn('ExerciseName is not a string during grouping check. Current:', currentExerciseBlock.ExerciseName, 'New:', setEntry.ExerciseName);
+                    } else if (setEntry.ExerciseName.trim().toLowerCase() !== currentExerciseBlock.ExerciseName.trim().toLowerCase()) {
+                        isNewExercise = true;
+                    }
+
+                    if (isNewExercise) {
                         if (currentExerciseBlock) {
-                            groupedExercisesArray.push(currentExerciseBlock);
-                        }
-                        if (currentExerciseBlock) {
-                            // Finalize progression for the completed block BEFORE pushing
                             const workSetForProgression = currentExerciseBlock.sets.find(s => s.SetType && s.SetType.toLowerCase().includes('work'));
                             if (workSetForProgression) {
                                 currentExerciseBlock.Progression = String(workSetForProgression.Progression || "").trim();
                             } else {
-                                // If no work set, ensure Progression is blank or as initialized
-                                currentExerciseBlock.Progression = String(currentExerciseBlock.Progression || "").trim();
+                                currentExerciseBlock.Progression = "";
                             }
                             groupedExercisesArray.push(currentExerciseBlock);
                         }
+                        // Log why a new block is being created
+                        console.log(`New block reason: currentBlock was "${currentBlockNameForLog}", new set is "${setEntry.ExerciseName}", Order: ${setEntry.ExerciseOrder}`);
                         currentExerciseBlock = {
-                            ExerciseName: setEntry.ExerciseName,
+                            ExerciseName: setEntry.ExerciseName.trim(), // Ensure trimmed name is stored
                             ExerciseOrder: setEntry.ExerciseOrder,
-                            Progression: "", // Initialize as empty; will be sourced from the first work set
+                            Progression: "", // Initialize, will be filled from work set
                             sets: [setEntry]
                         };
-                    } else {
+                    } else { // ExerciseName is the same (case-insensitive), add to current block's sets
                         currentExerciseBlock.sets.push(setEntry);
-                        // Note: Progression is now determined once the block is complete.
-                        // No need to try and update it during set accumulation here.
                     }
                 });
 
-                if (currentExerciseBlock) { // Handle the last block
+                if (currentExerciseBlock) { // Push the last exercise block
                     const workSetForProgression = currentExerciseBlock.sets.find(s => s.SetType && s.SetType.toLowerCase().includes('work'));
                     if (workSetForProgression) {
                         currentExerciseBlock.Progression = String(workSetForProgression.Progression || "").trim();
                     } else {
-                        currentExerciseBlock.Progression = String(currentExerciseBlock.Progression || "").trim(); // Or ensure it's just ""
+                        currentExerciseBlock.Progression = "";
                     }
                     groupedExercisesArray.push(currentExerciseBlock);
                 }
+                // END OF MODIFIED/REPLACED LOOP SECTION
 
                 // The groupedExercisesArray should already be sorted by ExerciseOrder
                 // if the individualSetsArray was sorted and ExerciseOrder is consistent for an exercise.
